@@ -23,7 +23,13 @@ export async function GET(req: NextRequest) {
 
     claimsQuery += ' ORDER BY created_at DESC LIMIT 50';
 
-    const claimsRes = await db.query(claimsQuery, claimsParams);
+    let claimsRes = await db.query(claimsQuery, claimsParams);
+
+    if (claimsRes.rowCount === 0 && !draftId) {
+      const { seedDatabase } = await import('@/infrastructure/database/seed');
+      await seedDatabase(false);
+      claimsRes = await db.query(claimsQuery, claimsParams);
+    }
 
     const evidenceQuery = 'SELECT * FROM evidence_items ORDER BY created_at DESC LIMIT 50';
     const evidenceRes = await db.query(evidenceQuery);

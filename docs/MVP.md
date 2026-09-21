@@ -74,3 +74,45 @@ All 22 Phase 2 acceptance criteria (AC-01 through AC-22) are implemented and ver
 | **AC-20** | Strategy recommendations require owner approval (YELLOW tier) | PASS | Applied only upon owner confirmation; updates Brain version |
 | **AC-21** | Research engine incorporates Channel Brain topics and exclusions | PASS | Filters candidate queries and rejects blacklisted keywords |
 | **AC-22** | Drafting engine incorporates Channel Brain tone, style, and rules | PASS | Synthesizes drafts adhering strictly to Brain persona and voice guidelines |
+
+---
+
+## 4. Phase 3: Real Research Intelligence + Real Sources + Production Telegram Matrix
+
+All 33 Phase 3 acceptance criteria (AC-01 through AC-33) are implemented and verified:
+
+| ID | Description | Status | Verification Detail |
+|---|---|---|---|
+| **AC-01** | Resilient research provider initializes with primary Gemini grounding and OpenAI fallback | PASS | `ResilientResearchProvider` wires Google Gemini Search Grounding as primary and OpenAI Responses API as fallback |
+| **AC-02** | Automatic failover to secondary provider when primary fails, logging failure to DB | PASS | Transparent circuit failover logs error to `provider_failure_logs` without interrupting discovery cycle |
+| **AC-03** | Safe URL fetcher blocks SSRF attacks against private IP addresses | PASS | Rejects IPv4/IPv6 private ranges (`127.0.0.1`, `10.0.0.1`, `169.254.169.254`, `192.168.1.1`) |
+| **AC-04** | Safe URL fetcher enforces size limits (<= 5MB) | PASS | Content-length and stream byte counters abort downloads exceeding 5MB |
+| **AC-05** | Safe URL fetcher enforces redirect limit (<= 3 hops) | PASS | Validates SSRF safety on every hop and enforces max 3-5 redirect hops |
+| **AC-06** | Safe URL fetcher enforces timeout safeguards (<= 15 seconds) | PASS | AbortController aborts hung connections safely |
+| **AC-07** | HTML article extractor strips navigation, headers, scripts, and extracts readable text | PASS | Cheerio readability extractor isolates `<article>` / `<main>` text and calculates reading time |
+| **AC-08** | Canonical URL normalization strips tracking parameters and standardizes host/path | PASS | Strips `utm_*`, `ref`, `fbclid`, trailing slashes, and normalizes ports and lowercase hostnames |
+| **AC-09** | YouTube connector parses video metadata, channel uploads, and transcripts | PASS | Integrates YouTube Data API v3 with video snippet and duration extraction |
+| **AC-10** | Reddit connector extracts top posts, discussion signals, and upvote score | PASS | Connects to Reddit API for subreddit signals and community discussions |
+| **AC-11** | Research planner creates queries across multilingual channels | PASS | Builds queries tailored to Channel Brain languages (`en`, `de`, `ja`, `ru`) |
+| **AC-12** | Research planner covers 5 distinct query diversity categories | PASS | Generates `BREAKING_NEWS`, `OFFICIAL_SOURCE`, `RESEARCH_PAPERS`, `OPEN_SOURCE_RELEASES`, and `COMMUNITY_SIGNALS` |
+| **AC-13** | Research planner incorporates Channel Brain topics, exclusions, and content mix | PASS | Queries weighted against content mix percentages while filtering excluded topics |
+| **AC-14** | Research planner respects Channel Brain Temporary Directives | PASS | Prioritizes active temporary directives ahead of standard topic distribution |
+| **AC-15** | Source trust tiering model classifies sources into Tier 1 to Tier 4 | PASS | Classifies Tier 1 (Official labs/papers), Tier 2 (Reputable tech media), Tier 3 (Community signals), Tier 4 (Unverified) |
+| **AC-16** | Source health monitoring tracks consecutive failures and degrades cleanly | PASS | Transitions source state: `HEALTHY` -> `DEGRADED` (3 fails) -> `FAILING` (5 fails) -> `DISABLED` |
+| **AC-17** | Novelty engine correctly classifies EXACT_DUPLICATE | PASS | URL matching and text similarity >= 70% correctly tagged as `EXACT_DUPLICATE` |
+| **AC-18** | Novelty engine identifies SAME_STORY_NEW_INFORMATION | PASS | Identifies shared core entities with material updates (weights, benchmarks, papers) |
+| **AC-19** | Novelty engine groups related items into story clusters | PASS | Clusters multiple independent source reports into unified `StoryCluster` entities |
+| **AC-20** | Breaking news classifier identifies BREAKING (< 2h, Tier 1, High Impact) | PASS | Identifies breaking developments published in under 2 hours by authoritative sources |
+| **AC-21** | Breaking news classifier distinguishes RECENT, CURRENT, and EVERGREEN | PASS | Distinguishes `< 24h` (`RECENT`), multi-day cycles (`CURRENT`), and historical papers (`EVERGREEN`) |
+| **AC-22** | Atomic claim extraction separates text into verifiable assertions | PASS | Deconstructs candidate body into atomic verifiable propositions with benchmark metrics |
+| **AC-23** | Evidence items store verbatim quotes, snippet, source URL, source type, and publication time | PASS | Full evidence provenance stored in `evidence_items` table with confidence metrics |
+| **AC-24** | Claim-to-Evidence graph links multiple evidence items to claims | PASS | Claim records link supporting and conflicting evidence IDs |
+| **AC-25** | Cross-source verification corroborates claim across independent sources | PASS | Marks claims `VERIFIED` with high confidence when corroborated by independent primary sources |
+| **AC-26** | Conflict detection flags contradictory claims across sources | PASS | Detects contradictions and refutations across sources, marking claims `CONTRADICTED` |
+| **AC-27** | Real Telegram client validates channel administrator and post permissions | PASS | Checks Telegram `getChat` and `getChatAdministrators` for `can_post_messages` permission |
+| **AC-28** | Real Telegram Bot service validates sender ID against numeric TELEGRAM_OWNER_USER_ID | PASS | Rejects unauthorized users; ensures private approvals only reach configured owner ID |
+| **AC-29** | Database-backed publishing lock prevents double publishing via idempotency key | PASS | Acquires locks in `publishing_locks` and returns identical published message ID on duplicate triggers |
+| **AC-30** | Draft approval card generates interactive buttons including [🔎 EVIDENCE] and [📚 SOURCES] | PASS | Interactive inline keyboard with `APPROVE`, `EDIT`, `REJECT`, `CHANGE_TIME`, `EVIDENCE`, and `SOURCES` |
+| **AC-31** | Callback queries for [🔎 EVIDENCE] and [📚 SOURCES] return detailed factual grounding | PASS | Returns verbatim claim-evidence graph and primary citations in Telegram chat |
+| **AC-32** | Safe test connection message verifies channel publishing | PASS | Sends safe test post to target channel confirming bot posting rights and link generation |
+| **AC-33** | Demo mode toggle allows zero-config offline execution when DEMO_MODE=true | PASS | Clean simulation mode allows complete test suite and web UI without real API keys |

@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS content_sources (
     tags TEXT NOT NULL DEFAULT '[]',
     polling_interval_minutes INTEGER NOT NULL DEFAULT 180,
     language TEXT NOT NULL DEFAULT 'en',
+    trust_tier INTEGER DEFAULT 2,
+    health_status TEXT DEFAULT 'HEALTHY',
+    consecutive_failures INTEGER DEFAULT 0,
+    last_failure_at TIMESTAMP WITH TIME ZONE,
     last_successful_fetch TIMESTAMP WITH TIME ZONE,
     last_error TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -313,7 +317,136 @@ CREATE TABLE IF NOT EXISTS channel_onboarding_sessions (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Performance & Query Indexes (Section 42 & Phase 2)
+-- ==============================================================
+-- Phase 3: Real Research Intelligence, Evidence, Claims & Telegram
+-- ==============================================================
+
+CREATE TABLE IF NOT EXISTS evidence_items (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    source_id TEXT,
+    source_url TEXT,
+    source_title TEXT,
+    source_type TEXT,
+    candidate_id TEXT,
+    claim_id TEXT,
+    quoted_passage TEXT,
+    text_content TEXT,
+    snippet TEXT,
+    normalized_claim TEXT,
+    publication_date TIMESTAMP WITH TIME ZONE,
+    published_at TIMESTAMP WITH TIME ZONE,
+    retrieval_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    confidence REAL NOT NULL DEFAULT 0.9,
+    confidence_score REAL NOT NULL DEFAULT 0.9,
+    evidence_type TEXT NOT NULL DEFAULT 'DIRECT_STATEMENT',
+    verification_status TEXT DEFAULT 'VERIFIED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS claims (
+    id TEXT PRIMARY KEY,
+    draft_id TEXT,
+    channel_id TEXT,
+    candidate_id TEXT,
+    text TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    importance TEXT NOT NULL DEFAULT 'HIGH',
+    confidence REAL NOT NULL DEFAULT 0.9,
+    verification_status TEXT NOT NULL DEFAULT 'SUPPORTED',
+    source_evidence_ids TEXT NOT NULL DEFAULT '[]',
+    conflicting_evidence_ids TEXT NOT NULL DEFAULT '[]',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS story_clusters (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    primary_source_id TEXT,
+    secondary_source_ids TEXT NOT NULL DEFAULT '[]',
+    common_claims TEXT NOT NULL DEFAULT '[]',
+    divergent_claims TEXT NOT NULL DEFAULT '[]',
+    earliest_publication_time TIMESTAMP WITH TIME ZONE,
+    latest_update_time TIMESTAMP WITH TIME ZONE,
+    is_material_update BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS publishing_locks (
+    id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL UNIQUE,
+    idempotency_key TEXT,
+    channel_id TEXT NOT NULL,
+    locked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    worker_id TEXT NOT NULL,
+    status TEXT DEFAULT 'LOCKED',
+    telegram_message_id INTEGER,
+    telegram_message_url TEXT
+);
+
+CREATE TABLE IF NOT EXISTS research_provider_logs (
+    id TEXT PRIMARY KEY,
+    run_id TEXT,
+    channel_id TEXT,
+    provider TEXT NOT NULL,
+    model TEXT,
+    request_type TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    error_category TEXT,
+    error_message TEXT,
+    token_usage TEXT DEFAULT '{}',
+    estimated_cost REAL DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS provider_failure_logs (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    action TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    fallback_provider TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS temporary_directives (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    directive_text TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'owner',
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Phase 3 Table Extensions
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT 'CUSTOM';
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS trust_tier INTEGER DEFAULT 2;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS source_hash TEXT;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS content_hash TEXT;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS excerpt TEXT;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS raw_metadata TEXT DEFAULT '{}';
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS fetch_status TEXT DEFAULT 'IDLE';
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS extraction_status TEXT DEFAULT 'IDLE';
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS average_latency_ms INTEGER DEFAULT 0;
+ALTER TABLE content_sources ADD COLUMN IF NOT EXISTS health_status TEXT DEFAULT 'HEALTHY';
+
+ALTER TABLE content_drafts ADD COLUMN IF NOT EXISTS channel_brain_version INTEGER DEFAULT 1;
+ALTER TABLE content_drafts ADD COLUMN IF NOT EXISTS claim_ids TEXT DEFAULT '[]';
+ALTER TABLE content_drafts ADD COLUMN IF NOT EXISTS evidence_ids TEXT DEFAULT '[]';
+
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS telegram_message_url TEXT;
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS media_file_ids TEXT DEFAULT '[]';
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS content_fingerprint TEXT;
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS topic TEXT;
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS technology TEXT;
+ALTER TABLE published_posts ADD COLUMN IF NOT EXISTS analytics_snapshot TEXT DEFAULT '{}';
+
+-- Performance & Query Indexes (Section 42 & Phase 2 & Phase 3)
 CREATE INDEX IF NOT EXISTS idx_channels_workspace ON channels(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status);
 CREATE INDEX IF NOT EXISTS idx_candidates_channel ON content_candidates(channel_id);
@@ -329,3 +462,8 @@ CREATE INDEX IF NOT EXISTS idx_channel_brain_versions ON channel_brain_versions(
 CREATE INDEX IF NOT EXISTS idx_owner_preferences_channel ON owner_preferences(channel_id, status);
 CREATE INDEX IF NOT EXISTS idx_strategy_recommendations_channel ON strategy_recommendations(channel_id, status);
 CREATE INDEX IF NOT EXISTS idx_onboarding_sessions_channel ON channel_onboarding_sessions(channel_id, status);
+CREATE INDEX IF NOT EXISTS idx_evidence_items_candidate ON evidence_items(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_claims_draft ON claims(draft_id);
+CREATE INDEX IF NOT EXISTS idx_story_clusters_channel ON story_clusters(channel_id);
+CREATE INDEX IF NOT EXISTS idx_provider_logs_run ON research_provider_logs(run_id);
+CREATE INDEX IF NOT EXISTS idx_temporary_directives_channel ON temporary_directives(channel_id, expires_at);

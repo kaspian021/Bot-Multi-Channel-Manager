@@ -59,3 +59,42 @@ The Research Engine autonomously monitors technology sources, extracts high-sign
   Source:
   https://example.com/source
   ```
+
+---
+
+## 4. Phase 3: Research Intelligence & Evidence Verification
+
+### 4.1 Resilient Provider Architecture
+- **Primary Search Grounding**: Google Gemini with Google Search Grounding for real-time web retrieval.
+- **Secondary Search Grounding**: OpenAI Web Search via Responses API tooling.
+- **Failover Logic**: Automatic failover upon rate limits (HTTP 429), timeouts, or provider downtime, with transparent logging to `provider_failure_logs`.
+
+### 4.2 Research Planner & 5 Query Classes
+The autonomous Research Planner synthesizes channel topics, content mix quotas, and temporary owner directives into 5 query classes:
+1. `BREAKING_NEWS`: High-urgency developments, zero-day vulnerabilities, major keynote announcements.
+2. `OFFICIAL_SOURCE`: Whitepapers, technical documentation, benchmark releases from primary lab domains.
+3. `RESEARCH_PAPERS`: arXiv preprint releases, algorithmic optimizations, architecture ablation studies.
+4. `OPEN_SOURCE_RELEASES`: GitHub releases, Hugging Face weights, local inference implementations.
+5. `COMMUNITY_SIGNALS`: Subreddit discussions (e.g. `r/LocalLLaMA`), technical video walkthroughs.
+
+### 4.3 Safe Web Ingestion & HTML Extraction
+- **SSRF Protection**: Strict host and IP validation blocking private CIDR ranges, AWS metadata endpoints, and non-HTTP schemes.
+- **Limits**: 5 MB payload limit, 15-second timeout, maximum 3-5 redirect hops.
+- **DOM Parsing**: Cheerio-powered readability engine strips navigation, ads, cookie banners, headers, and footer noise, isolating readable text paragraphs and computing reading times.
+
+### 4.4 Source Trust Model & Health Monitoring
+- **Tier 1 (Official / Labs)**: Primary researchers, model weights publishers, peer-reviewed arXiv preprints.
+- **Tier 2 (Reputable Tech Media)**: Established technical journalism and industry publications.
+- **Tier 3 (Community / Social Signals)**: Reddit discussions, YouTube talks, community benchmarks.
+- **Tier 4 (Unverified Aggregators)**: Secondary blogs and social commentary.
+- **Health Transitions**: Track consecutive failure counts: `HEALTHY` (0-2 failures) → `DEGRADED` (3-4 failures) → `FAILING` (5+ failures) → `DISABLED`.
+
+### 4.5 Story Clustering & Novelty Detection
+- `EXACT_DUPLICATE`: Same canonical URL or >= 70% semantic title similarity without novel data.
+- `SAME_STORY_NEW_INFORMATION`: Shared core story entities (e.g. "DeepSeek-V3") with new benchmark scores, weight releases, or post-launch evaluations.
+- `DISTINCT_STORY`: Independent developments, clustered by entity slugs into unified candidates.
+
+### 4.6 Claim ↔ Evidence Verification Graph
+- Extracts atomic factual propositions from candidate drafts.
+- Validates assertions against multiple primary evidence items.
+- Identifies conflicting statements or negated claims (`CONTRADICTED`), flagging fidelity violations before publication.

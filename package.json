@@ -10,12 +10,13 @@
     "worker": "tsx src/infrastructure/background/worker-runner.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:acceptance": "vitest run tests/acceptance.test.ts tests/phase2.acceptance.test.ts",
+    "test:acceptance": "vitest run tests/acceptance.test.ts tests/phase2.acceptance.test.ts tests/phase3.acceptance.test.ts",
     "seed": "tsx src/infrastructure/database/seed-runner.ts",
     "lint": "next lint"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",
+    "cheerio": "^1.2.0",
     "dotenv": "^16.4.7",
     "lucide-react": "^0.475.0",
     "next": "^14.2.24",

@@ -339,6 +339,20 @@ export interface Topic {
   createdAt: string;
 }
 
+export enum SourceTrustTier {
+  TIER_1 = 1,
+  TIER_2 = 2,
+  TIER_3 = 3,
+  TIER_4 = 4,
+}
+
+export enum SourceHealthStatus {
+  HEALTHY = 'HEALTHY',
+  DEGRADED = 'DEGRADED',
+  FAILING = 'FAILING',
+  DISABLED = 'DISABLED',
+}
+
 export interface ContentSource {
   id: string;
   channelId: string;
@@ -348,11 +362,22 @@ export interface ContentSource {
   enabled: boolean;
   priority: number; // 1-10
   trustScore: number; // 0-100
+  trustTier?: number; // 1 (Official), 2 (Reputable Tech), 3 (Community), 4 (Unverified)
+  provider?: string;
   tags: string[];
   pollingIntervalMinutes: number;
   language: string;
   lastSuccessfulFetch?: string;
   lastError?: string;
+  failureCount?: number;
+  averageLatencyMs?: number;
+  healthStatus?: 'HEALTHY' | 'DEGRADED' | 'FAILING' | 'DISABLED';
+  sourceHash?: string;
+  contentHash?: string;
+  excerpt?: string;
+  rawMetadata?: any;
+  fetchStatus?: string;
+  extractionStatus?: string;
   createdAt: string;
 }
 
@@ -378,6 +403,99 @@ export interface CandidateScoreBreakdown {
   originality: number;    // 0-100 (weight 0.05)
   confidence: number;     // 0-100 (weight 0.05)
   overallScore: number;   // calculated weighted score
+  evidenceStrength?: number;
+  storyUniqueness?: number;
+}
+
+// ==============================================================
+// PHASE 3: REAL RESEARCH INTELLIGENCE, EVIDENCE & CLAIMS
+// ==============================================================
+
+export type EvidenceType =
+  | 'DIRECT_STATEMENT'
+  | 'OFFICIAL_DOCUMENT'
+  | 'RESEARCH_RESULT'
+  | 'DATA_POINT'
+  | 'OBSERVATION'
+  | 'SECONDARY_REPORT'
+  | 'COMMUNITY_SIGNAL';
+
+export interface EvidenceItem {
+  id: string;
+  sourceId?: string;
+  candidateId?: string;
+  claimId?: string;
+  sourceUrl?: string;
+  sourceTitle?: string;
+  quotedPassage: string;
+  normalizedClaim: string;
+  publicationDate?: string;
+  retrievalDate: string;
+  confidence: number;
+  evidenceType: EvidenceType;
+  createdAt?: string;
+}
+
+export type ClaimVerificationStatus =
+  | 'UNVERIFIED'
+  | 'SUPPORTED'
+  | 'VERIFIED'
+  | 'PARTIALLY_SUPPORTED'
+  | 'PARTIALLY_VERIFIED'
+  | 'CONFLICTING'
+  | 'CONTRADICTED'
+  | 'REJECTED';
+
+export interface Claim {
+  id: string;
+  draftId?: string;
+  candidateId?: string;
+  channelId?: string;
+  text: string;
+  normalizedText: string;
+  importance: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  confidence: number;
+  verificationStatus: ClaimVerificationStatus;
+  sourceEvidenceIds: string[];
+  conflictingEvidenceIds: string[];
+  createdAt?: string;
+}
+
+export interface StoryCluster {
+  id: string;
+  channelId: string;
+  title: string;
+  primarySourceId?: string;
+  secondarySourceIds: string[];
+  commonClaims: string[];
+  divergentClaims: string[];
+  earliestPublicationTime?: string;
+  latestUpdateTime?: string;
+  isMaterialUpdate: boolean;
+  createdAt: string;
+}
+
+export type BreakingNewsCategory = 'BREAKING' | 'RECENT' | 'CURRENT' | 'EVERGREEN';
+
+export interface ResearchResult {
+  query: string;
+  provider: string;
+  searchTimestamp: string;
+  sourceList: { url: string; title: string; snippet?: string; publishedDate?: string }[];
+  citations: string[];
+  claims: string[];
+  confidence: number;
+  rawMetadata?: any;
+  normalizedEvidence: EvidenceItem[];
+}
+
+export interface TemporaryDirective {
+  id: string;
+  channelId: string;
+  directiveText: string;
+  createdBy: string;
+  expiresAt: string;
+  createdAt: string;
 }
 
 export interface ContentCandidate {
@@ -386,6 +504,7 @@ export interface ContentCandidate {
   channelId: string;
   researchRunId?: string;
   sourceId?: string;
+  storyClusterId?: string;
   title: string;
   canonicalUrl: string;
   normalizedUrl: string;
@@ -395,19 +514,24 @@ export interface ContentCandidate {
   contentType: ContentType;
   summary: string;
   extractedClaims: string[];
+  claims?: Claim[];
+  evidence?: EvidenceItem[];
   score: CandidateScoreBreakdown;
+  scoringVersion?: string;
   isDuplicate: boolean;
   duplicateOfCandidateId?: string;
   duplicateDecisionReason?: string;
+  breakingNewsStatus?: BreakingNewsCategory;
   createdAt: string;
 }
 
 export interface FactCheckItem {
   claim: string;
-  status: 'VERIFIED' | 'UNVERIFIED' | 'UNCERTAIN';
+  status: 'VERIFIED' | 'UNVERIFIED' | 'UNCERTAIN' | 'CONFLICTING';
   supportingSources: string[];
   confidence: number;
   notes?: string;
+  evidenceId?: string;
 }
 
 export interface QualityGateEvaluation {
@@ -427,6 +551,7 @@ export interface ContentDraft {
   workspaceId: string;
   channelId: string;
   candidateId?: string;
+  channelBrainVersion?: number;
   topic: string;
   title: string;
   headline: string;
@@ -442,8 +567,11 @@ export interface ContentDraft {
   suggestedPublishTime: string;
   mediaUrl?: string;
   mediaPrompt?: string;
-  sources: { title: string; url: string; publisher?: string }[];
+  sources: { title: string; url: string; publisher?: string; trustTier?: number }[];
   factCheckItems: FactCheckItem[];
+  claims?: Claim[];
+  claimIds?: string[];
+  evidenceIds?: string[];
   qualityEvaluation?: QualityGateEvaluation;
   telegramMessageId?: number;
   rejectionReason?: string;
@@ -474,8 +602,14 @@ export interface PublishedPost {
   scheduledPostId?: string;
   telegramMessageId: number;
   telegramChatId: string;
+  telegramMessageUrl?: string;
   publishedText: string;
   mediaUrl?: string;
+  mediaFileIds?: string[];
+  contentFingerprint?: string;
+  topic?: string;
+  technology?: string;
+  analyticsSnapshot?: any;
   publishedAt: string;
   createdAt: string;
 }

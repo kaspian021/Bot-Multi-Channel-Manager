@@ -18,6 +18,8 @@ import {
   History,
   Bot,
   Settings,
+  ShieldCheck,
+  CheckCircle,
 } from 'lucide-react';
 
 const navigation = [
@@ -27,12 +29,15 @@ const navigation = [
   { name: 'Research & Runs', href: '/research', icon: Sparkles },
   { name: 'Candidates', href: '/candidates', icon: Database },
   { name: 'Drafts & Approval', href: '/drafts', icon: FileText },
+  { name: 'Evidence & Claims', href: '/evidence', icon: ShieldCheck },
   { name: 'Calendar / Schedule', href: '/calendar', icon: Calendar },
   { name: 'Published Posts', href: '/published', icon: Send },
   { name: 'Content Sources', href: '/sources', icon: Database },
   { name: 'Topics', href: '/topics', icon: Tag },
   { name: 'Brand Manager', href: '/brand', icon: Palette },
   { name: 'Telegram Bot & Sim', href: '/telegram-bot', icon: Bot },
+  { name: 'Telegram Setup', href: '/telegram-setup', icon: Send },
+  { name: 'Production Status', href: '/production', icon: Activity },
   { name: 'Prompts & AI', href: '/prompts', icon: Terminal },
   { name: 'Audit Logs', href: '/audit', icon: History },
   { name: 'System Health', href: '/health', icon: Activity },

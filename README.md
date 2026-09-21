@@ -1,19 +1,27 @@
 # AI Multi-Channel Telegram Manager
 
-[![Tests](https://img.shields.io/badge/Tests-68%20Passed-emerald.svg)]()
-[![Acceptance](https://img.shields.io/badge/Acceptance%20Tests-42%2F42%20Passed-blue.svg)]()
-[![Phase 2](https://img.shields.io/badge/Phase%202-Channel%20Brain%20%2B%20Multilingual-teal.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-101%20Passed-emerald.svg)]()
+[![Acceptance](https://img.shields.io/badge/Acceptance%20Tests-75%2F75%20Passed-blue.svg)]()
+[![Phase 3](https://img.shields.io/badge/Phase%203-Research%20Intelligence%20%2B%20Production%20Telegram-teal.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Multi--Tenant-purple.svg)]()
 [![Demo Mode](https://img.shields.io/badge/Demo%20Mode-Ready-green.svg)]()
 
-> **Production-Ready AI Multi-Channel Telegram Manager — Phase 1 & Phase 2**
-> An autonomous, channel-aware, multilingual editorial and Telegram publishing platform equipped with persistent Channel Brain DNA, conversational AI onboarding, multilingual synthesis, version rollback, and preference learning.
+> **Production-Ready AI Multi-Channel Telegram Manager — Phases 1, 2 & 3**
+> An autonomous, channel-aware, multilingual research intelligence and Telegram publishing engine equipped with Google Gemini search grounding, OpenAI fallback, SSRF-safe ingestion, Claim ↔ Evidence graph verification, story clustering, Channel Brain DNA, and production Telegram Bot integration.
 
 ---
 
 ## 1. Project Overview
 
 **AI Channel Manager** operates like an expert human channel manager:
+* **Research Intelligence Engine**: Real-time web search grounding via Google Gemini with automated circuit failover to OpenAI Responses API and failure audit logging.
+* **Autonomous Research Planner**: Synthesizes Channel Brain topics, multilingual queries (`en`, `de`, `ja`, `ru`), 5 distinct query diversity categories, content mix ratios, and Temporary Directives.
+* **Safe Ingestion & SSRF Defense**: URL fetcher enforcing private IP blocking (RFC 1918, link-local, AWS metadata), 5MB size caps, 15-second timeouts, and redirect controls.
+* **Article & Content Extraction**: Cheerio-powered readability parser that strips boilerplate, navigation, ads, headers, and computes reading times.
+* **Source Trust & Health State Machine**: 4-tier source model (Tier 1 Official Labs to Tier 4 Aggregators) with consecutive failure tracking (`HEALTHY` -> `DEGRADED` -> `FAILING` -> `DISABLED`).
+* **Novelty Detection & Story Clustering**: Distinguishes `EXACT_DUPLICATE` from `SAME_STORY_NEW_INFORMATION` with entity-aware clustering and breaking news classification (`BREAKING`, `RECENT`, `CURRENT`, `EVERGREEN`).
+* **First-Class Evidence & Claim Graph**: Deconstructs candidate drafts into atomic factual assertions, cross-verifying them against primary evidence items and flagging contradictions.
+* **Production Telegram Bot Engine**: Live Bot API adapter validating administrator privileges (`can_post_messages`), numeric owner authorization, database-backed idempotency publishing locks, safe test connection messaging, and inline action buttons (`[✅ APPROVE]`, `[✏️ EDIT]`, `[❌ REJECT]`, `[⏰ CHANGE TIME]`, `[🔎 EVIDENCE]`, `[📚 SOURCES]`).
 * **Channel Brain (Channel DNA)**: Persistent 10-section channel profile (identity, audience, content strategy, style, sources, publishing, media, approval, business, restrictions).
 * **Conversational AI Onboarding**: Interactive Telegram/web interview with smart questioning that extracts channel attributes and requires human approval before channel activation.
 * **Multilingual Intelligence**: Discovers sources across multiple languages (German, Japanese, English) and synthesizes them into target channel language with technical term protection (CUDA, Transformer, PyTorch).
@@ -21,15 +29,7 @@
 * **Preferences & Edit Learning**: Strictly enforces explicit owner rules over AI-inferred learning signals; learns editorial conciseness and anti-hype policies from manual revisions.
 * **Channel Brain Versioning & Rollback**: Immutable version snapshots on every change with diff tracking, actor attribution, and 1-click restore.
 * **Strategy Recommendations**: Autonomous AI suggestions (e.g. content mix shifts) requiring owner approval (YELLOW permission tier).
-* **Discovers** high-signal technology intelligence across the web, arXiv RSS, YouTube, and developer communities.
-* **Evaluates** and scores stories using a multi-factor weighted algorithm.
-* **Deduplicates** stories using canonical URL normalization and Jaccard token similarity.
-* **Fact-Checks** claims against primary sources without hallucinating false benchmarks.
-* **Generates** high-quality Telegram posts adhering to structured readability guidelines.
-* **Runs Quality Gate** reviews to block hype and clickbait words (*"revolutionary breakthrough"*, *"mind-blowing"*).
-* **Sends Telegram Proposals** directly to the channel owner's private chat with interactive inline action buttons (`[Approve]`, `[Edit]`, `[Reject]`, `[Schedule]`, `[Sources]`).
-* **Publishes Automatically** upon owner authorization with full idempotency protection.
-* **Maintains Audit Trails** for every autonomous decision and owner action.
+* **Interactive Web Dashboard**: Complete web management panel with `/production` (Provider status & health), `/telegram-setup` (Connection wizard & permission test), `/evidence` (Evidence graph inspector), and `/telegram-bot` (Telegram Bot simulator).
 
 ---
 

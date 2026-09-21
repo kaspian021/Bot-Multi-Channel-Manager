@@ -4,6 +4,9 @@
 
 import { ContentCandidate } from './types';
 
+export const normalizeCanonicalUrl = normalizeUrl;
+export const calculateTitleSimilarity = calculateTextSimilarity;
+
 export interface DuplicateCheckResult {
   isDuplicate: boolean;
   duplicateOfCandidateId?: string;

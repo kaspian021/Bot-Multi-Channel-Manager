@@ -643,4 +643,56 @@ export async function seedDatabase(force = false): Promise<void> {
       ]
     );
   }
+
+  // ==============================================================
+  // PHASE 3 SEED: EVIDENCE ITEMS, CLAIMS, TRUST TIERS, HEALTH
+  // ==============================================================
+  await db.query(`
+    UPDATE content_sources
+    SET 
+      trust_tier = CASE 
+        WHEN type IN ('WEB', 'RSS') AND priority >= 9 THEN 1
+        WHEN type IN ('YOUTUBE', 'REDDIT') THEN 3
+        ELSE 2
+      END,
+      health_status = 'HEALTHY',
+      consecutive_failures = 0
+  `);
+
+  // Seed sample Evidence Items
+  const ev1Id = 'ev-demo-001';
+  const ev2Id = 'ev-demo-002';
+
+  await db.query(`
+    INSERT INTO evidence_items (
+      id, channel_id, source_id, source_url, source_title, source_type,
+      published_at, text_content, snippet, confidence_score, verification_status
+    ) VALUES 
+    ($1, $2, 'src-arxiv-ai', 'https://github.com/deepseek-ai/DeepSeek-V3', 'DeepSeek-V3 Technical Report', 'OFFICIAL_SOURCE',
+     CURRENT_TIMESTAMP, 'DeepSeek-V3 incorporates 671 billion total parameters with 37 billion active parameters per token.',
+     '671B total parameters with 37B active parameters per token', 0.98, 'VERIFIED'),
+    ($3, $2, 'src-openai-news', 'https://modelcontextprotocol.io', 'Model Context Protocol Documentation', 'PRIMARY_RESEARCH',
+     CURRENT_TIMESTAMP, 'The Model Context Protocol standardizes JSON-RPC 2.0 communication between client hosts and agent tools.',
+     'Standardizes JSON-RPC 2.0 communication between client hosts and agent tools', 0.96, 'VERIFIED')
+    ON CONFLICT (id) DO NOTHING
+  `, [ev1Id, channelId, ev2Id]);
+
+  // Seed sample Claims
+  const cl1Id = 'claim-demo-001';
+  const cl2Id = 'claim-demo-002';
+
+  await db.query(`
+    INSERT INTO claims (
+      id, draft_id, channel_id, text, normalized_text, importance,
+      confidence, verification_status, source_evidence_ids
+    ) VALUES
+    ($1, $2, $3, 'DeepSeek-V3 uses 671B total parameters with 37B active', 'deepseek v3 uses 671b total parameters with 37b active',
+     'CRITICAL', 0.98, 'VERIFIED', $4),
+    ($5, 'draft-demo-002', $3, 'MCP uses JSON-RPC 2.0 protocol over Stdio and SSE', 'mcp uses json rpc 2.0 protocol over stdio and sse',
+     'CRITICAL', 0.96, 'VERIFIED', $6)
+    ON CONFLICT (id) DO NOTHING
+  `, [
+    cl1Id, draft1Id, channelId, JSON.stringify([ev1Id]),
+    cl2Id, JSON.stringify([ev2Id])
+  ]);
 }

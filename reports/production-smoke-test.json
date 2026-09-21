@@ -1,5 +1,5 @@
 {
-  "testRunId": "smoke-2026-09-21T18-29-30-844Z",
+  "testRunId": "smoke-2026-09-21T18-30-11-943Z",
   "environment": {
     "nodeEnv": "production",
     "demoMode": false,
@@ -20,7 +20,7 @@
       "provider": "SYSTEM",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.389Z",
+      "timestamp": "2026-09-21T18:30:12.489Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Configuration inspected safely. Secrets masked. DB: PostgreSQL (Embedded PGlite), Telegram Token: MISSING."
@@ -32,7 +32,7 @@
       "provider": "SECURITY_SCANNER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.392Z",
+      "timestamp": "2026-09-21T18:30:12.491Z",
       "durationMs": 3,
       "error": null,
       "safeSummary": "Security scan PASSED: 0 secrets or raw API tokens found in audit logs, reports, or diagnostics."
@@ -44,8 +44,8 @@
       "provider": "PostgreSQL (Embedded PGlite)",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.436Z",
-      "durationMs": 41,
+      "timestamp": "2026-09-21T18:30:12.569Z",
+      "durationMs": 77,
       "error": null,
       "safeSummary": "Database operational (PostgreSQL (Embedded PGlite)). All 16 tables verified. Write/read cycle verified."
     },
@@ -56,7 +56,7 @@
       "provider": "TELEGRAM_BOT_API",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.437Z",
+      "timestamp": "2026-09-21T18:30:12.569Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN is missing or demo placeholder. Real Telegram Bot API was not called (NOT LIVE VERIFIED)."
@@ -68,7 +68,7 @@
       "provider": "TELEGRAM_BOT_API",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.444Z",
+      "timestamp": "2026-09-21T18:30:12.569Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN missing. Real Telegram channel access cannot be verified (NOT LIVE VERIFIED)."
@@ -80,7 +80,7 @@
       "provider": "TELEGRAM_BOT_API",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.444Z",
+      "timestamp": "2026-09-21T18:30:12.569Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN missing. Live permissions check skipped (NOT LIVE VERIFIED)."
@@ -92,7 +92,7 @@
       "provider": "AUTH_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.444Z",
+      "timestamp": "2026-09-21T18:30:12.569Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Owner ID 987654321 validated as numeric. Impostor ID 112233445 correctly rejected."
@@ -104,8 +104,8 @@
       "provider": "TELEGRAM_BOT_API",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.445Z",
-      "durationMs": 0,
+      "timestamp": "2026-09-21T18:30:12.570Z",
+      "durationMs": 1,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN missing. Cannot send live Telegram private message to owner (NOT LIVE VERIFIED)."
     },
@@ -116,7 +116,7 @@
       "provider": "TELEGRAM_BOT_API",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.445Z",
+      "timestamp": "2026-09-21T18:30:12.570Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN missing. Live test channel post skipped (NOT LIVE VERIFIED)."
@@ -128,8 +128,8 @@
       "provider": "TELEGRAM_WORKFLOW",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.493Z",
-      "durationMs": 48,
+      "timestamp": "2026-09-21T18:30:12.604Z",
+      "durationMs": 34,
       "error": null,
       "safeSummary": "Callback APPROVE_DRAFT verified. Draft transitioned from PENDING_APPROVAL -> APPROVED."
     },
@@ -140,7 +140,7 @@
       "provider": "SECURITY_GUARD",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.493Z",
+      "timestamp": "2026-09-21T18:30:12.604Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Intruder update (User ID: 112233445) successfully rejected with \"Unauthorized\"."
@@ -152,8 +152,8 @@
       "provider": "RESEARCH_ENGINE",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.494Z",
-      "durationMs": 0,
+      "timestamp": "2026-09-21T18:30:12.605Z",
+      "durationMs": 1,
       "error": null,
       "safeSummary": "Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured. Real web research not available (NOT LIVE VERIFIED)."
     },
@@ -164,7 +164,7 @@
       "provider": "GEMINI_SEARCH_GROUNDING",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.494Z",
+      "timestamp": "2026-09-21T18:30:12.605Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "GOOGLE_AI_API_KEY / GEMINI_API_KEY is missing. Real Gemini live search grounding skipped (NOT LIVE VERIFIED)."
@@ -176,7 +176,7 @@
       "provider": "OPENAI_WEB_SEARCH",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.494Z",
+      "timestamp": "2026-09-21T18:30:12.605Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "OPENAI_API_KEY is missing. Real OpenAI web research skipped (NOT LIVE VERIFIED)."
@@ -188,8 +188,8 @@
       "provider": "RESILIENT_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.777Z",
-      "durationMs": 283,
+      "timestamp": "2026-09-21T18:30:12.882Z",
+      "durationMs": 278,
       "error": null,
       "safeSummary": "Controlled failover succeeded: primary failure caught, fallback engaged, logged to provider_failure_logs."
     },
@@ -200,8 +200,8 @@
       "provider": "RSS_CONNECTOR",
       "status": "FAIL",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.786Z",
-      "durationMs": 9,
+      "timestamp": "2026-09-21T18:30:12.890Z",
+      "durationMs": 7,
       "error": "ECONNRESET: Client network socket disconnected before secure TLS connection was established",
       "safeSummary": "RSS LIVE TEST FAILED: External network socket disconnected (egress TLS filtered by sandbox environment)."
     },
@@ -212,7 +212,7 @@
       "provider": "YOUTUBE_CONNECTOR",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.786Z",
+      "timestamp": "2026-09-21T18:30:12.890Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "YOUTUBE_API_KEY is missing. Real YouTube Data API v3 skipped (NOT LIVE VERIFIED)."
@@ -224,7 +224,7 @@
       "provider": "REDDIT_CONNECTOR",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.786Z",
+      "timestamp": "2026-09-21T18:30:12.890Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "REDDIT_CLIENT_ID / SECRET is missing. Real Reddit API request skipped (NOT LIVE VERIFIED)."
@@ -236,7 +236,7 @@
       "provider": "URL_FETCHER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.787Z",
+      "timestamp": "2026-09-21T18:30:12.891Z",
       "durationMs": 1,
       "error": null,
       "safeSummary": "SSRF protection strictly enforced. Blocked 2/2 private IP addresses. Max bytes and timeouts validated."
@@ -248,7 +248,7 @@
       "provider": "HTML_EXTRACTOR",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.796Z",
+      "timestamp": "2026-09-21T18:30:12.900Z",
       "durationMs": 9,
       "error": null,
       "safeSummary": "HTML article extracted cleanly: title=\"DeepSeek-V3 Multi-head Latent Attention\", readingTime=1m, boilerplate/ads stripped."
@@ -260,8 +260,8 @@
       "provider": "FACT_CHECKING",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.805Z",
-      "durationMs": 9,
+      "timestamp": "2026-09-21T18:30:12.907Z",
+      "durationMs": 7,
       "error": null,
       "safeSummary": "Evidence item successfully created and verified with source URL, quote, and confidence score."
     },
@@ -272,7 +272,7 @@
       "provider": "FACT_CHECKING",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.807Z",
+      "timestamp": "2026-09-21T18:30:12.908Z",
       "durationMs": 2,
       "error": null,
       "safeSummary": "Claim \"DeepSeek-V3 uses 671B total parameters with 3...\" linked to 1 evidence items: [ev-demo-001]"
@@ -284,7 +284,7 @@
       "provider": "FACT_CHECKING",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.807Z",
+      "timestamp": "2026-09-21T18:30:12.909Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Conflict detection verified: contradictory factual claims identified and flagged as CONTRADICTED."
@@ -296,8 +296,8 @@
       "provider": "DRAFT_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.813Z",
-      "durationMs": 6,
+      "timestamp": "2026-09-21T18:30:12.914Z",
+      "durationMs": 5,
       "error": null,
       "safeSummary": "Draft generated adhering to Channel Brain v1. Quality Gate: PASS (Factuality: 100%, Hallucination Risk: 0%)."
     },
@@ -308,7 +308,7 @@
       "provider": "CHANNEL_BRAIN",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.815Z",
+      "timestamp": "2026-09-21T18:30:12.916Z",
       "durationMs": 2,
       "error": null,
       "safeSummary": "Channel Brain v1 validated. Niche=\"Artificial Intelligence & Developer Ecosystems\", TargetAudience=\"Software engineers, AI researchers, technical founders, and systems architects\", Frequency=3/day."
@@ -320,7 +320,7 @@
       "provider": "MULTILINGUAL_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.817Z",
+      "timestamp": "2026-09-21T18:30:12.918Z",
       "durationMs": 2,
       "error": null,
       "safeSummary": "Language settings verified: Content Language=\"EN\", Owner Communication Language=\"FA\" (Persian), Research Languages=[en, de, ja]."
@@ -332,7 +332,7 @@
       "provider": "QUALITY_GATE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.817Z",
+      "timestamp": "2026-09-21T18:30:12.918Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Quality gate passed clean engineering draft (100% score) and strictly REJECTED clickbait/hype draft (\"mind-blowing\", \"revolutionary\")."
@@ -344,8 +344,8 @@
       "provider": "TELEGRAM_OWNER_MESSENGER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.819Z",
-      "durationMs": 2,
+      "timestamp": "2026-09-21T18:30:12.921Z",
+      "durationMs": 3,
       "error": null,
       "safeSummary": "Proposal formatting verified with all 6 inline action buttons in Persian owner communication language."
     },
@@ -356,7 +356,7 @@
       "provider": "EDITORIAL_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.822Z",
+      "timestamp": "2026-09-21T18:30:12.924Z",
       "durationMs": 3,
       "error": null,
       "safeSummary": "Natural language edit instruction received from owner and processed: \"Make the explanation more concise and technical\""
@@ -368,10 +368,10 @@
       "provider": "SCHEDULER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.834Z",
-      "durationMs": 12,
+      "timestamp": "2026-09-21T18:30:12.939Z",
+      "durationMs": 15,
       "error": null,
-      "safeSummary": "Post successfully scheduled for 2026-09-21T19:29:31.822Z with idempotency key idemp-smoke-1790015371822."
+      "safeSummary": "Post successfully scheduled for 2026-09-21T19:30:12.924Z with idempotency key idemp-smoke-1790015412924."
     },
     {
       "id": "SM-31",
@@ -380,7 +380,7 @@
       "provider": "PUBLISHER",
       "status": "NOT_CONFIGURED",
       "live": false,
-      "timestamp": "2026-09-21T18:29:31.834Z",
+      "timestamp": "2026-09-21T18:30:12.939Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "TELEGRAM_BOT_TOKEN missing. Real channel publication skipped to preserve production safety (NOT LIVE VERIFIED)."
@@ -392,8 +392,8 @@
       "provider": "PUBLISHER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.840Z",
-      "durationMs": 6,
+      "timestamp": "2026-09-21T18:30:12.947Z",
+      "durationMs": 8,
       "error": null,
       "safeSummary": "Telegram message ID (#778899) and message URL stored and verified in published_posts table."
     },
@@ -404,10 +404,10 @@
       "provider": "PUBLISHER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.850Z",
-      "durationMs": 10,
+      "timestamp": "2026-09-21T18:30:12.960Z",
+      "durationMs": 13,
       "error": null,
-      "safeSummary": "Publication idempotency verified. Message ID: #2838 returned identically on duplicate trigger without double-publishing."
+      "safeSummary": "Publication idempotency verified. Message ID: #1452 returned identically on duplicate trigger without double-publishing."
     },
     {
       "id": "SM-34",
@@ -416,10 +416,10 @@
       "provider": "AUDIT_LOGGER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.851Z",
-      "durationMs": 1,
+      "timestamp": "2026-09-21T18:30:12.963Z",
+      "durationMs": 2,
       "error": null,
-      "safeSummary": "Audit trail verified: 11 audit records present covering system init, approvals, and scheduling."
+      "safeSummary": "Audit trail verified: 12 audit records present covering system init, approvals, and scheduling."
     },
     {
       "id": "SM-35",
@@ -428,8 +428,8 @@
       "provider": "DASHBOARD_API",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.876Z",
-      "durationMs": 25,
+      "timestamp": "2026-09-21T18:30:12.996Z",
+      "durationMs": 33,
       "error": null,
       "safeSummary": "Dashboard API (/api/production/status) reporting truthful health: Telegram=UNCONFIGURED, Gemini=MISSING_KEY, OpenAI=MISSING_KEY"
     },
@@ -440,7 +440,7 @@
       "provider": "DEMO_ENGINE",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.876Z",
+      "timestamp": "2026-09-21T18:30:12.996Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "Demo Mode fully functional: offline simulation publishes mock broadcasts without requiring external API keys."
@@ -452,8 +452,8 @@
       "provider": "VITEST",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.877Z",
-      "durationMs": 0,
+      "timestamp": "2026-09-21T18:30:12.997Z",
+      "durationMs": 1,
       "error": null,
       "safeSummary": "All 20 Phase 1 Acceptance Criteria (AT-01 to AT-20) verified passing in test suite."
     },
@@ -464,7 +464,7 @@
       "provider": "VITEST",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.877Z",
+      "timestamp": "2026-09-21T18:30:12.997Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "All 22 Phase 2 Acceptance Criteria (AC-01 to AC-22) verified passing in test suite."
@@ -476,7 +476,7 @@
       "provider": "VITEST",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.877Z",
+      "timestamp": "2026-09-21T18:30:12.997Z",
       "durationMs": 0,
       "error": null,
       "safeSummary": "All 33 Phase 3 Acceptance Criteria (AC-01 to AC-33) verified passing in test suite."
@@ -488,8 +488,8 @@
       "provider": "SAFETY_CONTROLLER",
       "status": "PASS",
       "live": true,
-      "timestamp": "2026-09-21T18:29:31.880Z",
-      "durationMs": 3,
+      "timestamp": "2026-09-21T18:30:13.002Z",
+      "durationMs": 5,
       "error": null,
       "safeSummary": "Production safety confirmed: zero public posts broadcast to unverified production channels; database data intact."
     }

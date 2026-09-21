@@ -4,33 +4,36 @@
 
 import fs from 'fs';
 import path from 'path';
-import pg from 'pg';
-import type { QueryResultRow, Pool as PgPool } from 'pg';
 import { PGlite } from '@electric-sql/pglite';
 
-const { Pool } = pg;
-
-export interface DatabaseQueryResult<T extends QueryResultRow = any> {
+export interface DatabaseQueryResult<T = any> {
   rows: T[];
   rowCount: number;
 }
 
 export interface IDatabaseClient {
-  query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>>;
+  query<T = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>>;
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
   getProviderName(): string;
 }
 
 class PostgresDatabaseClient implements IDatabaseClient {
-  private pool: PgPool;
+  private pool: any;
 
   constructor(connectionString: string) {
+    let pgModule: any;
+    try {
+      pgModule = require('pg');
+    } catch {
+      throw new Error('pg package is required when using external DATABASE_CONNECTION_STRING');
+    }
+    const { Pool } = pgModule;
     this.pool = new Pool({ connectionString });
   }
 
-  async query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>> {
-    const res = await this.pool.query<T>(text, params);
+  async query<T = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>> {
+    const res = await this.pool.query(text, params);
     return {
       rows: res.rows,
       rowCount: res.rowCount ?? res.rows.length,
@@ -80,7 +83,7 @@ class PGliteDatabaseClient implements IDatabaseClient {
     await this.initPromise;
   }
 
-  async query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>> {
+  async query<T = any>(text: string, params?: any[]): Promise<DatabaseQueryResult<T>> {
     await this.ensureInitialized();
     if (!this.client) throw new Error('PGlite client is not initialized');
 

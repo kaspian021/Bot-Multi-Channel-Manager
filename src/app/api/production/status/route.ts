@@ -15,7 +15,7 @@ export async function GET() {
     const isDemoMode = process.env.DEMO_MODE === 'true';
 
     // 1. Provider statuses
-    const geminiKey = process.env.GEMINI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
     const youtubeKey = process.env.YOUTUBE_API_KEY;
     const redditKey = process.env.REDDIT_CLIENT_ID;

@@ -15,7 +15,8 @@ export async function seedDatabase(force = false): Promise<void> {
   if (count > 0 && !force) {
     // Check if channel_brains table already has entries
     const brainCheck = await db.query('SELECT count(*) as count FROM channel_brains');
-    if (parseInt(brainCheck.rows[0]?.count || '0', 10) > 0) {
+    const claimsCheck = await db.query('SELECT count(*) as count FROM claims');
+    if (parseInt(brainCheck.rows[0]?.count || '0', 10) > 0 && parseInt(claimsCheck.rows[0]?.count || '0', 10) > 0) {
       return;
     }
   }

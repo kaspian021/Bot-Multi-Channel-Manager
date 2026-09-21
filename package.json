@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:acceptance": "vitest run tests/acceptance.test.ts tests/phase2.acceptance.test.ts tests/phase3.acceptance.test.ts",
+    "test:smoke": "tsx scripts/run-production-smoke-test.ts",
     "seed": "tsx src/infrastructure/database/seed-runner.ts",
     "lint": "next lint"
   },

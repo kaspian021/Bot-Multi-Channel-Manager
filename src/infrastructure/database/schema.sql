@@ -710,3 +710,19 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_account_metric ON usage_events(accou
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON integration_outbox(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_editorial_learning_channel ON editorial_learning_events(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_editorial_plans_channel_day ON editorial_plans(channel_id, plan_date);
+
+-- Hardening: secure machine-call replay prevention, recommendation dedupe,
+-- and Telegram channel ownership are database-enforced invariants.
+CREATE TABLE IF NOT EXISTS integration_request_nonces (
+    integration_key TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (integration_key, request_id)
+);
+
+ALTER TABLE strategy_recommendations ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_recommendations_pending_fingerprint
+    ON strategy_recommendations(channel_id, fingerprint) WHERE status = 'PENDING' AND fingerprint IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_telegram_chat_unique
+    ON channels(telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;

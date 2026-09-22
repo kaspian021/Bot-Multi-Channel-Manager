@@ -47,9 +47,10 @@ export class DraftService {
     const accountId = workspace.rows[0]?.account_id;
     if (!accountId) throw new Error('Workspace is not bound to an account; generation is fail-closed');
     await this.entitlementGuard.assertGenerationInterval({ accountId, workspaceId: channel.workspace_id, channelId: channel.id });
+    const generationOperationKey = `draft-generation:${candidateId}`;
     await this.entitlementGuard.assert({
       accountId, workspaceId: channel.workspace_id, channelId: channel.id,
-      operation: 'GENERATE', source: 'draft-service', idempotencyKey: `draft-generation:${candidateId}`,
+      operation: 'GENERATE', source: 'draft-service', idempotencyKey: generationOperationKey,
     });
 
     const brain = await this.brainService.getBrain(cand.channel_id);
@@ -76,21 +77,18 @@ export class DraftService {
     const tone = brain?.style.tone || 'expert, concise, modern, credible';
     const audience = brain?.audience.targetAudience || 'Software engineers and technical founders';
 
-    const structuredOutput = await ai.generateStructuredDraft(
-      cand.title,
-      {
-        title: cand.title,
-        url: cand.canonical_url,
-        sourceName: cand.author || channel.name,
-        publishedAt: cand.published_at,
-        summary: cand.summary,
-        claims,
-        relevanceScore: 90,
-        noveltyScore: 88,
-        technicalDepthScore: 92,
-      },
-      contentLanguage
-    );
+    let structuredOutput: Awaited<ReturnType<typeof ai.generateStructuredDraft>>;
+    try {
+      structuredOutput = await ai.generateStructuredDraft(
+        cand.title,
+        { title: cand.title, url: cand.canonical_url, sourceName: cand.author || channel.name, publishedAt: cand.published_at, summary: cand.summary, claims, relevanceScore: 90, noveltyScore: 88, technicalDepthScore: 92 },
+        contentLanguage
+      );
+      await this.entitlementGuard.markAttemptOutcome('GENERATE', generationOperationKey, 'SUCCESSFUL');
+    } catch (error) {
+      await this.entitlementGuard.markAttemptOutcome('GENERATE', generationOperationKey, 'FAILED', error instanceof Error ? error.message : 'AI request failed');
+      throw error;
+    }
 
     // If source was foreign (e.g., German source), ensure English headline and translation synthesis
     let headline = structuredOutput.headline;
@@ -225,9 +223,10 @@ export class DraftService {
     const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [current.workspace_id]);
     const accountId = workspace.rows[0]?.account_id;
     if (!accountId) throw new Error('Workspace is not bound to an account; AI revision is fail-closed');
+    const revisionOperationKey = `draft-revision:${draftId}:${(current.revision_count || 0) + 1}`;
     await this.entitlementGuard.assert({
       accountId, workspaceId: current.workspace_id, channelId: current.channel_id,
-      operation: 'AI_EDIT', source: 'draft-service', idempotencyKey: `draft-revision:${draftId}:${(current.revision_count || 0) + 1}`,
+      operation: 'AI_EDIT', source: 'draft-service', idempotencyKey: revisionOperationKey,
     });
 
     const whyMatters = typeof current.why_it_matters === 'string'
@@ -237,23 +236,17 @@ export class DraftService {
       ? JSON.parse(current.sources)
       : current.sources;
 
-    const revised = await ai.reviseDraft(
-      {
-        headline: current.headline,
-        body: current.body,
-        explanation: current.explanation,
-        whyItMatters: whyMatters,
-        technicalContext: current.technical_context,
-        whatToWatch: current.what_to_watch,
-        sources,
-        confidence: current.confidence_score,
-        contentScore: current.content_score,
-        contentType: current.content_type,
-        topics: [current.topic],
-        extractedClaims: [],
-      },
-      instruction
-    );
+    let revised: Awaited<ReturnType<typeof ai.reviseDraft>>;
+    try {
+      revised = await ai.reviseDraft(
+        { headline: current.headline, body: current.body, explanation: current.explanation, whyItMatters: whyMatters, technicalContext: current.technical_context, whatToWatch: current.what_to_watch, sources, confidence: current.confidence_score, contentScore: current.content_score, contentType: current.content_type, topics: [current.topic], extractedClaims: [] },
+        instruction
+      );
+      await this.entitlementGuard.markAttemptOutcome('AI_EDIT', revisionOperationKey, 'SUCCESSFUL');
+    } catch (error) {
+      await this.entitlementGuard.markAttemptOutcome('AI_EDIT', revisionOperationKey, 'FAILED', error instanceof Error ? error.message : 'AI request failed');
+      throw error;
+    }
 
     const newRevisionCount = (current.revision_count || 0) + 1;
     await db.query(

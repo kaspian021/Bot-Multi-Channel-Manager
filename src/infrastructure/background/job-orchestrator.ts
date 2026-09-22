@@ -40,8 +40,10 @@ export class BackgroundJobOrchestrator {
   }
 
   async runAutonomousCycle(maxChannels = Math.max(1, Number(process.env.WORKER_CHANNELS_PER_TICK || 10))): Promise<OrchestrationResult> {
-    const published = await this.runScheduledPublishJob();
+    // Entitlement state is made effective before any due post is evaluated.
+    // This prevents a boundary-time publication under the superseded plan.
     await new SubscriptionService().applyDueDowngrades();
+    const published = await this.runScheduledPublishJob();
     const db = getDatabaseClient();
     const active = await db.query<{ id: string; workspace_id: string; account_id: string }>(
       `SELECT c.id, c.workspace_id, w.account_id FROM channels c JOIN workspaces w ON w.id = c.workspace_id

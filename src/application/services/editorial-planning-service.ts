@@ -120,13 +120,21 @@ export class EditorialPlanningService {
     const over = trends.find((trend) => trend.kind === 'OVER_COVERED');
     if (!over) return null;
     const db = getDatabaseClient();
+    const currentValue = { overCovered: over.topic };
+    const recommendedValue = { action: 'Review content mix; owner approval required' };
+    // Dynamic prose (for example the post count) must not defeat dedupe. The
+    // fingerprint captures only the material recommendation condition.
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ category: 'CONTENT_MIX', currentValue, recommendedValue, reasonClass: 'OVER_COVERED' })).digest('hex');
     const recommendationId = id('rec');
-    await db.query(
-      `INSERT INTO strategy_recommendations (id, channel_id, title, category, current_value, recommended_value, reason, status)
-       VALUES ($1, $2, $3, 'CONTENT_MIX', $4, $5, $6, 'PENDING')`,
-      [recommendationId, input.channelId, `Diversify away from ${over.topic}`, JSON.stringify({ overCovered: over.topic }), JSON.stringify({ action: 'Review content mix; owner approval required' }), over.reason]
+    const inserted = await db.query(
+      `INSERT INTO strategy_recommendations (id, channel_id, title, category, current_value, recommended_value, reason, fingerprint, status)
+       VALUES ($1, $2, $3, 'CONTENT_MIX', $4, $5, $6, $7, 'PENDING')
+       ON CONFLICT (channel_id, fingerprint) WHERE status = 'PENDING' AND fingerprint IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [recommendationId, input.channelId, `Diversify away from ${over.topic}`, JSON.stringify(currentValue), JSON.stringify(recommendedValue), over.reason, fingerprint]
     );
-    await AuditService.log(input.workspaceId, input.channelId, 'AI_WORKER' as any, 'editorial-planner', 'STRATEGY_RECOMMENDATION_CREATED', 'STRATEGY_RECOMMENDATION', recommendationId, { reason: over.reason });
+    if (!inserted.rowCount) return null;
+    await AuditService.log(input.workspaceId, input.channelId, 'AI_WORKER' as any, 'editorial-planner', 'STRATEGY_RECOMMENDATION_CREATED', 'STRATEGY_RECOMMENDATION', recommendationId, { reason: over.reason, fingerprint });
     return recommendationId;
   }
 

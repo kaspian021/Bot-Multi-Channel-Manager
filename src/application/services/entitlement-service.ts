@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { EntitlementProvider } from '../interfaces/entitlement-provider';
 import { MockEntitlementProvider } from '../../infrastructure/entitlements/mock-entitlement-provider';
 import { RemoteEntitlementProvider } from '../../infrastructure/entitlements/remote-entitlement-provider';
-import { getDatabaseClient } from '../../infrastructure/database/db-client';
+import { getDatabaseClient, IDatabaseClient } from '../../infrastructure/database/db-client';
 import { AuditService } from './audit-service';
 import { AuditActorType, Entitlement, SubscriptionStatus, UsageMetric } from '../../domain/types';
 
@@ -100,40 +100,51 @@ export class UsageMeter {
     accountId: string; workspaceId?: string; channelId?: string; productKey?: string; metric: UsageMetric;
     maximum: number; quantity?: number; source: string; idempotencyKey: string; metadata?: Record<string, unknown>;
   }): Promise<boolean> {
+    const db = getDatabaseClient(); const quantity = input.quantity || 1;
+    // Keep event insertion, quota increment/rejection, and outbox creation in
+    // one transaction. Concurrent equal idempotency keys observe the final
+    // reservation state rather than an in-progress insert.
+    return db.transaction(async (tx) => {
+      const event = await tx.query<{ id: string }>(
+        `INSERT INTO usage_events (id,account_id,workspace_id,channel_id,product_key,metric,quantity,source,idempotency_key,metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
+        [newId('usage'), input.accountId, input.workspaceId || null, input.channelId || null, input.productKey || productKey(), input.metric, quantity, input.source, input.idempotencyKey, JSON.stringify({ ...input.metadata, reservationState: 'RESERVED' })]
+      );
+      if (!event.rowCount) {
+        const existing = await tx.query<{ metadata: string }>('SELECT metadata FROM usage_events WHERE idempotency_key=$1', [input.idempotencyKey]);
+        let metadata: Record<string, unknown> = {}; try { metadata = typeof existing.rows[0]?.metadata === 'string' ? JSON.parse(existing.rows[0].metadata || '{}') : existing.rows[0]?.metadata || {}; } catch { /* legacy malformed metadata is safely treated as charged */ }
+        return !metadata.quotaRejected;
+      }
+      const counter = await tx.query<{ quantity: number }>(
+        `INSERT INTO usage_daily_counters (account_id,workspace_id,channel_id,product_key,metric,period_start,quantity,updated_at)
+         VALUES ($1,$2,$3,$4,$5,CURRENT_DATE,$6,CURRENT_TIMESTAMP)
+         ON CONFLICT (account_id,workspace_id,channel_id,product_key,metric,period_start)
+         DO UPDATE SET quantity=usage_daily_counters.quantity+EXCLUDED.quantity,updated_at=CURRENT_TIMESTAMP
+         WHERE usage_daily_counters.quantity+EXCLUDED.quantity <= $7 RETURNING quantity`,
+        [input.accountId, input.workspaceId || '', input.channelId || '', input.productKey || productKey(), input.metric, quantity, input.maximum]
+      );
+      if (!counter.rowCount) {
+        await tx.query('UPDATE usage_events SET metadata=$1 WHERE id=$2', [JSON.stringify({ ...input.metadata, reservationState: 'REJECTED', quotaRejected: true }), event.rows[0].id]);
+        return false;
+      }
+      await new IntegrationOutboxService().enqueue('usage.recorded', event.rows[0].id, { ...input, occurredAt: new Date().toISOString(), reservationState: 'RESERVED' }, `usage:${input.idempotencyKey}`, tx);
+      return true;
+    });
+  }
+
+  /** Reservations are charged on attempt, not AI success. Retried operation keys reuse the reservation. */
+  async markReservationOutcome(idempotencyKey: string, outcome: 'SUCCESSFUL' | 'FAILED', error?: string): Promise<void> {
     const db = getDatabaseClient();
-    const quantity = input.quantity || 1;
-    // First reserve an immutable event. Replays are already successful and do
-    // not increment quota a second time.
-    const event = await db.query<{ id: string }>(
-      `INSERT INTO usage_events (id, account_id, workspace_id, channel_id, product_key, metric, quantity, source, idempotency_key, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
-      [newId('usage'), input.accountId, input.workspaceId || null, input.channelId || null, input.productKey || productKey(), input.metric, quantity,
-        input.source, input.idempotencyKey, JSON.stringify(input.metadata || {})]
-    );
-    if (!event.rowCount) return true;
-    const counter = await db.query<{ quantity: number }>(
-      `INSERT INTO usage_daily_counters (account_id, workspace_id, channel_id, product_key, metric, period_start, quantity, updated_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, CURRENT_TIMESTAMP)
-       ON CONFLICT (account_id, workspace_id, channel_id, product_key, metric, period_start)
-       DO UPDATE SET quantity = usage_daily_counters.quantity + EXCLUDED.quantity, updated_at = CURRENT_TIMESTAMP
-       WHERE usage_daily_counters.quantity + EXCLUDED.quantity <= $7
-       RETURNING quantity`,
-      [input.accountId, input.workspaceId || '', input.channelId || '', input.productKey || productKey(), input.metric, quantity, input.maximum]
-    );
-    if (!counter.rowCount) {
-      // Event is retained as rejected attempt evidence but has no counter/outbox.
-      await db.query("UPDATE usage_events SET metadata = metadata || $1 WHERE id = $2", [JSON.stringify({ quotaRejected: true }), event.rows[0].id]).catch(() => undefined);
-      return false;
-    }
-    await new IntegrationOutboxService().enqueue('usage.recorded', event.rows[0].id, { ...input, occurredAt: new Date().toISOString() }, `usage:${input.idempotencyKey}`);
-    return true;
+    const event = await db.query<{ metadata: string }>('SELECT metadata FROM usage_events WHERE idempotency_key = $1', [idempotencyKey]);
+    if (!event.rowCount) return;
+    let metadata: Record<string, unknown> = {};
+    try { metadata = typeof event.rows[0].metadata === 'string' ? JSON.parse(event.rows[0].metadata || '{}') : event.rows[0].metadata || {}; } catch { /* preserve deterministic outcome even for legacy metadata */ }
+    await db.query('UPDATE usage_events SET metadata = $1 WHERE idempotency_key = $2', [JSON.stringify({ ...metadata, reservationState: outcome, failureReason: error?.slice(0, 200) }), idempotencyKey]);
   }
 }
 
 export class IntegrationOutboxService {
-  async enqueue(eventType: string, aggregateId: string, payload: Record<string, unknown>, idempotencyKey: string): Promise<void> {
-    const db = getDatabaseClient();
+  async enqueue(eventType: string, aggregateId: string, payload: Record<string, unknown>, idempotencyKey: string, db: IDatabaseClient = getDatabaseClient()): Promise<void> {
     await db.query(
       `INSERT INTO integration_outbox (id, event_type, aggregate_id, payload, idempotency_key, status, next_attempt_at)
        VALUES ($1, $2, $3, $4, $5, 'PENDING', CURRENT_TIMESTAMP)
@@ -142,19 +153,27 @@ export class IntegrationOutboxService {
     );
   }
 
+  /** Atomically changes and returns only rows exclusively owned by this worker. */
   async claimPending(limit = 20): Promise<Array<Record<string, unknown>>> {
     const db = getDatabaseClient();
-    // Claiming is optimistic and idempotent. The delivery worker can safely
-    // retry any PROCESSING row that has passed next_attempt_at.
-    const rows = await db.query(
-      `SELECT * FROM integration_outbox WHERE status IN ('PENDING', 'FAILED')
-       AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-       ORDER BY created_at ASC LIMIT $1`, [limit]
-    );
-    for (const row of rows.rows) {
-      await db.query("UPDATE integration_outbox SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND status IN ('PENDING', 'FAILED')", [row.id]);
-    }
-    return rows.rows;
+    return db.transaction(async (tx) => {
+      const pglite = tx.getProviderName().includes('PGlite');
+      // PGlite serializes transaction callbacks but does not expose SKIP LOCKED
+      // on all supported versions. The update predicate still makes ownership
+      // atomic there; external PostgreSQL gets row-level SKIP LOCKED.
+      const lock = pglite ? '' : 'FOR UPDATE SKIP LOCKED';
+      const claimed = await tx.query(
+        `WITH candidates AS (
+           SELECT id FROM integration_outbox
+           WHERE status IN ('PENDING', 'FAILED')
+             AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+           ORDER BY created_at ASC ${lock} LIMIT $1
+         )
+         UPDATE integration_outbox o SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP
+         FROM candidates c WHERE o.id = c.id AND o.status IN ('PENDING', 'FAILED') RETURNING o.*`, [limit]
+      );
+      return claimed.rows;
+    });
   }
 
   async markDelivered(id: string): Promise<void> {
@@ -234,6 +253,12 @@ export class EntitlementGuard {
     }
     await this.audit(input, 'ENTITLEMENT_RESOLVED', { planCode: entitlement.planCode, version: entitlement.version });
     return entitlement;
+  }
+
+  /** Mark a metered AI operation's terminal attempt state without releasing quota. */
+  async markAttemptOutcome(operation: 'GENERATE' | 'AI_EDIT', idempotencyKey: string, outcome: 'SUCCESSFUL' | 'FAILED', error?: string): Promise<void> {
+    const keys = operation === 'GENERATE' ? [idempotencyKey, `${idempotencyKey}:ai-request`] : [idempotencyKey];
+    await Promise.all(keys.map((key) => this.meter.markReservationOutcome(key, outcome, error)));
   }
 
   async assertGenerationInterval(input: { accountId: string; workspaceId: string; channelId: string }): Promise<Entitlement> {

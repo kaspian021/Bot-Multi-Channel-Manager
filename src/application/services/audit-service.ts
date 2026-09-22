@@ -2,7 +2,7 @@
 // Audit Service — Section 34 Specification
 // ==============================================================
 
-import { getDatabaseClient } from '../../infrastructure/database/db-client';
+import { getDatabaseClient, IDatabaseClient } from '../../infrastructure/database/db-client';
 import { AuditActorType } from '../../domain/types';
 
 export class AuditService {
@@ -14,9 +14,9 @@ export class AuditService {
     action: string,
     entityType: string,
     entityId: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    db: IDatabaseClient = getDatabaseClient()
   ): Promise<void> {
-    const db = getDatabaseClient();
     const id = `audit-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     await db.query(

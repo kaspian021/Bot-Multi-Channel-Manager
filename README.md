@@ -126,7 +126,7 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 The application does not own passwords. A future website creates an external `Account` identity (`externalProvider` + `externalUserId`), workspaces, and memberships. Telegram users are linked through a random, opaque `link_<token>` deep link. Only a SHA-256 token digest is stored; challenges expire after `ACCOUNT_LINK_TOKEN_TTL_SECONDS`, can be consumed once, and never contain account data. Numeric Telegram IDs—not usernames—are the identity key.
 
-Every customer-owned route resolves a `TenantContext` and validates workspace membership before loading a channel or draft. In production a trusted account gateway must supply an external identity context. `DEMO_MODE=true` resolves only the explicit demo fixture. The legacy `TELEGRAM_OWNER_USER_ID` is a demo simulator fallback, never a production authorization authority.
+Every customer-owned route resolves a `TenantContext` and validates workspace membership before loading a channel or draft. In production the application rejects unsigned `x-account-id` / external-identity headers: a trusted product-to-product caller must prove them with the signed integration contract below. Browser/human authentication remains the future website's responsibility and is deliberately not impersonated by an integration key. `DEMO_MODE=true` resolves only the explicit demo fixture. The legacy `TELEGRAM_OWNER_USER_ID` is a demo simulator fallback, never a production authorization authority.
 
 ### Entitlements, usage, and scheduled expiry
 
@@ -147,7 +147,7 @@ The versioned adapter contract lives below `/api/integrations/v1`:
 - `POST /link/verify`
 - `POST /webhooks/subscription`
 
-The webhook endpoint verifies `x-integration-signature` as `HMAC-SHA256(timestamp + '.' + rawBody)`, requires `x-integration-timestamp` and `x-integration-event-id`, uses constant-time comparison, enforces a five-minute replay window, and persists event-id idempotency. Configure `INTEGRATION_WEBHOOK_SECRET` before production use. `MockEntitlementProvider` works offline today; `RemoteEntitlementProvider` is selected only with `ENTITLEMENT_PROVIDER=remote`.
+All integration endpoints are machine-to-machine only and require `X-Integration-Key`, `X-Integration-Timestamp`, `X-Integration-Signature`, and `X-Integration-Request-Id`. The signature is `HMAC-SHA256(timestamp + '.' + method + '.' + path + '.' + rawBody)` using `INTEGRATION_REQUEST_SECRET`; comparison is constant-time, timestamps have a five-minute window, and request IDs are durably replay-protected. These keys authenticate a service, **not a human browser**. Configure `INTEGRATION_AUTH_KEY` and `INTEGRATION_REQUEST_SECRET` before production use. Subscription event IDs provide a second, durable business-idempotency layer. `MockEntitlementProvider` works offline today; `RemoteEntitlementProvider` is selected only with `ENTITLEMENT_PROVIDER=remote`.
 
 ### Demo verification
 

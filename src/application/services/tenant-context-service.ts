@@ -10,6 +10,7 @@
 import { NextRequest } from 'next/server';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { WorkspaceRole } from '../../domain/types';
+import { authenticateTrustedIntegrationRequest } from '../../infrastructure/security/trusted-integration-auth';
 
 export class TenantAccessError extends Error {
   constructor(message: string, public readonly statusCode = 403) {
@@ -40,30 +41,34 @@ function header(request: NextRequest, name: string): string | undefined {
 }
 
 /**
- * Resolves an externally-authenticated account to a selected workspace. In
- * DEMO_MODE an explicit database demo fixture is used, never a production
- * fallback. In production missing identity is rejected closed.
+ * Resolves a selected workspace only after an authenticated caller has proved
+ * authority to assert account identity. Browser users must be authenticated by
+ * the product's future browser boundary; this application accepts machine
+ * identity assertions solely from the signed integration contract. Demo mode
+ * has one explicit fixture and does not make supplied identity headers trusted.
  */
 export async function resolveTenantContext(request: NextRequest): Promise<TenantContext> {
   const db = getDatabaseClient();
   const demoMode = process.env.DEMO_MODE === 'true';
+  const assertedAccountId = header(request, 'x-account-id');
+  const assertedExternalUserId = header(request, 'x-external-user-id');
   let accountId: string | undefined;
 
-  if (demoMode && !header(request, 'x-external-user-id') && !header(request, 'x-account-id')) {
+  if (demoMode && !assertedAccountId && !assertedExternalUserId) {
     accountId = process.env.DEMO_ACCOUNT_ID || 'acc-demo-001';
   } else {
-    // x-account-id is reserved for a trusted gateway/service-to-service
-    // caller. Browser-facing integrations should use external identity.
-    accountId = header(request, 'x-account-id');
-    if (!accountId) {
+    // Never trust x-account-id or x-external-user-id from an unsigned caller.
+    await authenticateTrustedIntegrationRequest(request);
+    accountId = assertedAccountId;
+    if (accountId) {
+      const account = await db.query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 AND status = $2', [accountId, 'ACTIVE']);
+      if (!account.rowCount) throw new TenantAccessError('Unknown or inactive account', 401);
+    } else {
       const provider = header(request, 'x-external-provider') || 'digistore';
-      const externalUserId = header(request, 'x-external-user-id');
-      if (!externalUserId) {
-        throw new TenantAccessError('Missing authenticated account context', 401);
-      }
+      if (!assertedExternalUserId) throw new TenantAccessError('Missing authenticated account context', 401);
       const account = await db.query<{ id: string }>(
         'SELECT id FROM accounts WHERE external_provider = $1 AND external_user_id = $2 AND status = $3',
-        [provider, externalUserId, 'ACTIVE']
+        [provider, assertedExternalUserId, 'ACTIVE']
       );
       if (account.rowCount === 0) throw new TenantAccessError('Unknown or inactive account', 401);
       accountId = account.rows[0].id;

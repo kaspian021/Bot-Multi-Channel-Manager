@@ -44,16 +44,10 @@ export class RealTelegramClient implements ITelegramPublisher, ITelegramOwnerMes
     error?: string;
   }> {
     if (!this.isConfigured()) {
-      return {
-        valid: true,
-        isValid: true,
-        title: 'FutureStack AI (Channel Verified)',
-        channelTitle: 'FutureStack AI (Channel Verified)',
-        username: typeof channelChatId === 'string' && channelChatId.startsWith('@') ? channelChatId : undefined,
-        isAdministrator: true,
-        canPostMessages: true,
-        canEditMessages: true,
-      };
+      // Simulated verification is strictly a Demo-mode fixture. Production may
+      // never claim bot authority without querying Telegram.
+      if (process.env.DEMO_MODE === 'true') return { valid: true, isValid: true, title: 'Demo Channel (Verified)', channelTitle: 'Demo Channel (Verified)', username: typeof channelChatId === 'string' && channelChatId.startsWith('@') ? channelChatId : undefined, isAdministrator: true, canPostMessages: true, canEditMessages: true };
+      return { valid: false, isValid: false, isAdministrator: false, canPostMessages: false, error: 'Telegram bot credentials are not configured' };
     }
 
     try {

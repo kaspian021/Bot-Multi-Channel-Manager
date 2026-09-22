@@ -29,6 +29,8 @@ Upgrades apply as a new active entitlement immediately. Downgrades with a future
 
 `EntitlementGuard` protects channel creation, research, generation, AI edits, scheduling, strategy planning, and publish. Immutable usage events are deduplicated with idempotency keys; daily counters use atomic upserts. `CONTENT_GENERATION` and `AI_REQUEST` are independent metrics.
 
+AI quota is **charged on a reserved attempt**, not only on a successful provider response. Reservation events carry `RESERVED`, `SUCCESSFUL`, `FAILED`, or `REJECTED` state in metadata. Retrying the same operation idempotency key reuses its original reservation and cannot double-charge or create unlimited new reservations; a new operation key is a new attempt.
+
 Generation has a non-bypassable platform floor:
 
 ```text
@@ -53,7 +55,7 @@ The versioned contract is documented in the README and exposed at:
 - `POST /api/integrations/v1/link/verify`
 - `POST /api/integrations/v1/webhooks/subscription`
 
-Subscription webhooks use raw-body HMAC-SHA256 over `${timestamp}.${rawBody}`, constant-time comparison, a five-minute timestamp window, and event-id replay protection. Set `INTEGRATION_WEBHOOK_SECRET`; accepted and rejected events are persisted/audited without secrets.
+Every `/api/integrations/v1` route is service-to-service only. It requires `X-Integration-Key`, `X-Integration-Timestamp`, `X-Integration-Signature`, and `X-Integration-Request-Id`, with HMAC-SHA256 over `${timestamp}.${method}.${path}.${rawBody}`. The application uses constant-time comparison, a five-minute timestamp window, and durable request-ID replay protection; subscription events add durable event-ID idempotency. Set `INTEGRATION_AUTH_KEY` and `INTEGRATION_REQUEST_SECRET`. An integration key never authenticates a human browser, and an `externalUserId` is only a lookup key after the machine caller is authenticated.
 
 ## Worker and demo
 

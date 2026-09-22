@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { AccountLinkingService } from '@/application/services/account-linking-service';
 import { getDatabaseClient } from '@/infrastructure/database/db-client';
+import { authenticateTrustedIntegrationRequest, IntegrationAuthenticationError } from '@/infrastructure/security/trusted-integration-auth';
 export const dynamic = 'force-dynamic';
-function authorized(req: NextRequest): boolean { const key = process.env.INTEGRATION_API_KEY; if (!key) return process.env.DEMO_MODE === 'true'; const value = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || ''; const a = Buffer.from(key), b = Buffer.from(value); return a.length === b.length && crypto.timingSafeEqual(a, b); }
-/** Creates an opaque deep-link challenge after the future website authenticated its user. */
+/** A machine-authenticated account provider creates the opaque Telegram deep-link challenge. */
 export async function POST(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json({ error: 'Unauthorized integration caller' }, { status: 401 });
   try {
+    await authenticateTrustedIntegrationRequest(req);
     const body = await req.json();
     const provider = body.externalProvider || 'digistore';
     if (!body.externalUserId) return NextResponse.json({ error: 'externalUserId is required' }, { status: 400 });
@@ -21,6 +20,8 @@ export async function POST(req: NextRequest) {
     }
     const challenge = await service.createLinkChallenge(accountId, workspaceId, body.ttlSeconds);
     const botUsername = body.botUsername || process.env.TELEGRAM_BOT_USERNAME;
+    // The token is intentionally only exposed to a test/demo provider; real
+    // providers receive a deep-link and deliver it to their authenticated user.
     return NextResponse.json({ accountId, workspaceId, expiresAt: challenge.expiresAt, deepLink: botUsername ? `https://t.me/${botUsername.replace('@', '')}?start=link_${challenge.token}` : undefined, token: process.env.DEMO_MODE === 'true' ? challenge.token : undefined }, { status: 201 });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Link challenge failed' }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Link challenge failed' }, { status: error instanceof IntegrationAuthenticationError ? error.statusCode : 400 }); }
 }

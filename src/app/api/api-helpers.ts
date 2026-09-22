@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { TenantAccessError, TenantContext, resolveTenantContext } from '@/application/services/tenant-context-service';
 import { seedDatabase } from '@/infrastructure/database/seed';
+import { IntegrationAuthenticationError } from '@/infrastructure/security/trusted-integration-auth';
 
 export async function tenantFor(request: NextRequest): Promise<TenantContext> {
   // Demo fixture preparation is explicit and harmlessly idempotent. Production
@@ -10,7 +11,7 @@ export async function tenantFor(request: NextRequest): Promise<TenantContext> {
 }
 
 export function apiError(error: unknown, fallback = 'Request failed'): NextResponse {
-  if (error instanceof TenantAccessError) return NextResponse.json({ error: error.message }, { status: error.statusCode });
+  if (error instanceof TenantAccessError || error instanceof IntegrationAuthenticationError) return NextResponse.json({ error: error.message }, { status: error.statusCode });
   const message = error instanceof Error ? error.message : fallback;
   return NextResponse.json({ error: message || fallback }, { status: 500 });
 }

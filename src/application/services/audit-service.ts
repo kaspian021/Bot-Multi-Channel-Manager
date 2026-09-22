@@ -2,6 +2,7 @@
 // Audit Service — Section 34 Specification
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient, IDatabaseClient } from '../../infrastructure/database/db-client';
 import { AuditActorType } from '../../domain/types';
 
@@ -17,7 +18,7 @@ export class AuditService {
     metadata?: Record<string, unknown>,
     db: IDatabaseClient = getDatabaseClient()
   ): Promise<void> {
-    const id = `audit-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const id = `audit-${crypto.randomUUID()}`;
 
     await db.query(
       `INSERT INTO audit_logs (id, workspace_id, channel_id, actor_type, actor_id, action, entity_type, entity_id, metadata)

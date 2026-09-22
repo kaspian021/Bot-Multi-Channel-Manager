@@ -2,6 +2,7 @@
 // Draft Generation & Editorial Service — Channel Brain Aware
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { getAiProvider } from '../../infrastructure/ai/ai-provider-factory';
 import { getTelegramBotService } from '../../infrastructure/telegram/telegram-bot-service';
@@ -46,8 +47,14 @@ export class DraftService {
     const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [channel.workspace_id]);
     const accountId = workspace.rows[0]?.account_id;
     if (!accountId) throw new Error('Workspace is not bound to an account; generation is fail-closed');
-    await this.entitlementGuard.assertGenerationInterval({ accountId, workspaceId: channel.workspace_id, channelId: channel.id });
-    const generationOperationKey = `draft-generation:${candidateId}`;
+    const generationOperationKey = `draft-generation:${candidateId}:${crypto.randomUUID()}`;
+    // Slot acquisition happens before metering and before any external AI work.
+    // It is database-atomic, so manual/API/Telegram/worker entrypoints that
+    // use DraftService share the same channel interval protection.
+    await this.entitlementGuard.tryAcquireGenerationSlot({
+      accountId, workspaceId: channel.workspace_id, channelId: channel.id,
+      operationId: generationOperationKey, source: 'draft-service',
+    });
     await this.entitlementGuard.assert({
       accountId, workspaceId: channel.workspace_id, channelId: channel.id,
       operation: 'GENERATE', source: 'draft-service', idempotencyKey: generationOperationKey,
@@ -90,12 +97,13 @@ export class DraftService {
       throw error;
     }
 
-    // If source was foreign (e.g., German source), ensure English headline and translation synthesis
     let headline = structuredOutput.headline;
     let explanation = structuredOutput.explanation || structuredOutput.body;
-    if (cand.title.includes('Max-Planck-Institut') || cand.title.includes('Quanten-Algorithmus')) {
-      headline = 'Max Planck Institute researchers achieve 2.8x speedup in transformer inference via quantum-inspired tensor compression';
-      explanation = 'Researchers at the Max Planck Institute have open-sourced a quantum-inspired tensor compression library that accelerates matrix multiplication kernels by 2.8x on standard GPU clusters while maintaining numerical precision.';
+    // Deterministic translation wording is retained only for the explicit demo
+    // fixture; production uses provider output grounded in the stored source.
+    if (process.env.DEMO_MODE === 'true' && (cand.title.includes('Max-Planck-Institut') || cand.title.includes('Quanten-Algorithmus'))) {
+      headline = 'Demo: quantum-inspired tensor compression for transformer inference';
+      explanation = 'Demo fixture translation for the stored multilingual candidate.';
     }
 
     // 5. AI Quality Gate (Section 15 & 32)
@@ -110,7 +118,7 @@ export class DraftService {
       isDuplicateLikely: cand.is_duplicate,
     });
 
-    const draftId = `draft-${Date.now()}`;
+    const draftId = `draft-${crypto.randomUUID()}`;
     const initialStatus = DraftStatus.PENDING_APPROVAL;
 
     const draft: ContentDraft = {
@@ -223,7 +231,7 @@ export class DraftService {
     const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [current.workspace_id]);
     const accountId = workspace.rows[0]?.account_id;
     if (!accountId) throw new Error('Workspace is not bound to an account; AI revision is fail-closed');
-    const revisionOperationKey = `draft-revision:${draftId}:${(current.revision_count || 0) + 1}`;
+    const revisionOperationKey = `draft-revision:${draftId}:${crypto.randomUUID()}`;
     await this.entitlementGuard.assert({
       accountId, workspaceId: current.workspace_id, channelId: current.channel_id,
       operation: 'AI_EDIT', source: 'draft-service', idempotencyKey: revisionOperationKey,
@@ -381,13 +389,15 @@ export class DraftService {
     let synthesizedHeadline = candidate.title;
     let synthesizedBody = candidate.content || candidate.title;
 
-    // Simulate multilingual synthesis (e.g., Japanese or German -> English)
-    if (candidate.sourceLanguage === 'ja' || candidate.title.includes('ヒューマノイド')) {
-      synthesizedHeadline = 'Autonomous Humanoid Robotics Control Architecture Powered by CUDA and Transformer Models';
-      synthesizedBody = 'Japanese robotics researchers have presented a next-generation humanoid controller that leverages CUDA accelerated compute kernels and Transformer attention architectures for real-time spatial manipulation.';
-    } else if (candidate.sourceLanguage === 'de' || candidate.title.includes('Quanten')) {
-      synthesizedHeadline = 'Quantum-Inspired Tensor Compression Accelerates Transformer Inference';
-      synthesizedBody = 'Researchers have developed an open-source tensor compression library that accelerates matrix multiplication kernels on GPU clusters with CUDA while maintaining precision.';
+    // Explicit demo-only multilingual synthesis fixture. Production preserves
+    // the connector-provided candidate and delegates synthesis to the real AI
+    // provider rather than manufacturing research claims in application code.
+    if (process.env.DEMO_MODE === 'true' && (candidate.sourceLanguage === 'ja' || candidate.title.includes('ヒューマノイド'))) {
+      synthesizedHeadline = 'Demo: Humanoid Robotics Control Architecture with CUDA';
+      synthesizedBody = 'Demo fixture translation for a Japanese multilingual candidate using CUDA and Transformer control.';
+    } else if (process.env.DEMO_MODE === 'true' && (candidate.sourceLanguage === 'de' || candidate.title.includes('Quanten'))) {
+      synthesizedHeadline = 'Demo: Quantum-Inspired Tensor Compression';
+      synthesizedBody = 'Demo fixture translation for a German multilingual candidate.';
     }
 
     if (langSettings.preserveTechnicalTerms) {
@@ -396,10 +406,10 @@ export class DraftService {
     }
 
     const draft: ContentDraft & { targetLanguage: string } = {
-      id: `draft-synth-${Date.now()}`,
+      id: `draft-synth-${crypto.randomUUID()}`,
       workspaceId,
       channelId,
-      candidateId: candidate.id || `cand-synth-${Date.now()}`,
+      candidateId: candidate.id || `cand-synth-${crypto.randomUUID()}`,
       topic: 'Robotics & Hardware',
       title: candidate.title,
       headline: synthesizedHeadline,

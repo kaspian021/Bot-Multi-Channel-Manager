@@ -75,7 +75,8 @@ export class OpenAiWebSearchProvider implements IWebSearchProvider {
       }
     }
 
-    // High-Fidelity Demo Search
+    if (process.env.DEMO_MODE !== 'true') return [];
+    // Explicit demo-only search fixture.
     return [
       {
         title: `OpenAI Engineering Blog: Scaling Frontier Systems for ${query}`,

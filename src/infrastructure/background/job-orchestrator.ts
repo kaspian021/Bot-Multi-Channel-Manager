@@ -2,6 +2,7 @@
 // Phase 4 fair, multi-channel, plan-aware background orchestrator
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../database/db-client';
 import { ResearchService } from '../../application/services/research-service';
 import { DraftService } from '../../application/services/draft-service';
@@ -104,7 +105,7 @@ export class BackgroundJobOrchestrator {
 
   private async acquireGenerationLock(channelId: string): Promise<boolean> {
     const db = getDatabaseClient();
-    const lockKey = `worker-${process.pid}-${Date.now()}`;
+    const lockKey = `worker-${process.pid}-${crypto.randomUUID()}`;
     await db.query(`INSERT INTO editorial_runtime_state (channel_id, updated_at) VALUES ($1, CURRENT_TIMESTAMP) ON CONFLICT (channel_id) DO NOTHING`, [channelId]);
     const result = await db.query(
       `UPDATE editorial_runtime_state SET generation_lock_key = $1, generation_lock_until = CURRENT_TIMESTAMP + INTERVAL '10 minutes', updated_at = CURRENT_TIMESTAMP

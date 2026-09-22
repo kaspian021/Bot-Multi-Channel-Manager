@@ -261,26 +261,40 @@ export class EntitlementGuard {
     await Promise.all(keys.map((key) => this.meter.markReservationOutcome(key, outcome, error)));
   }
 
-  async assertGenerationInterval(input: { accountId: string; workspaceId: string; channelId: string }): Promise<Entitlement> {
+  /**
+   * Atomically reserves a per-channel generation slot before any quota charge
+   * or external AI request. The conditional UPDATE is the cross-process lock:
+   * concurrent workers, APIs, and Telegram commands cannot all pass it.
+   */
+  async tryAcquireGenerationSlot(input: { accountId: string; workspaceId: string; channelId: string; operationId: string; source: string }): Promise<Entitlement> {
     const entitlement = await this.getActive(input.accountId);
+    if (!entitlement.features.autonomousGeneration) throw new EntitlementDeniedError('Plan does not enable generate');
     const floor = Math.max(1, Number(process.env.PLATFORM_MIN_GENERATION_INTERVAL_SECONDS || 300));
     const effectiveSeconds = Math.max(floor, Number(entitlement.limits.generationIntervalSeconds || 0));
     const db = getDatabaseClient();
-    const state = await db.query<{ last_generated_at: string | null }>('SELECT last_generated_at FROM editorial_runtime_state WHERE channel_id = $1', [input.channelId]);
-    const lastGenerated = state.rows[0]?.last_generated_at ? new Date(state.rows[0].last_generated_at).getTime() : 0;
-    if (lastGenerated && Date.now() - lastGenerated < effectiveSeconds * 1000) {
-      await this.audit({ ...input, operation: 'GENERATE', source: 'generation-gate' }, 'GENERATION_INTERVAL_BLOCKED', { effectiveSeconds });
+    await db.query(`INSERT INTO editorial_runtime_state (channel_id, updated_at) VALUES ($1,CURRENT_TIMESTAMP) ON CONFLICT (channel_id) DO NOTHING`, [input.channelId]);
+    const claimed = await db.query(
+      `UPDATE editorial_runtime_state SET last_generated_at=CURRENT_TIMESTAMP, generation_operation_id=$1, updated_at=CURRENT_TIMESTAMP
+       WHERE channel_id=$2
+         AND (last_generated_at IS NULL OR last_generated_at <= CURRENT_TIMESTAMP - ($3 * INTERVAL '1 second'))
+       RETURNING channel_id`, [input.operationId, input.channelId, effectiveSeconds]
+    );
+    if (!claimed.rowCount) {
+      await this.audit({ ...input, operation: 'GENERATE' }, 'GENERATION_INTERVAL_BLOCKED', { effectiveSeconds, operationId: input.operationId });
       throw new EntitlementDeniedError(`Generation interval gate is active (${effectiveSeconds}s)`, 'GENERATION_INTERVAL_BLOCKED');
     }
+    await this.audit({ ...input, operation: 'GENERATE' }, 'GENERATION_SLOT_ACQUIRED', { effectiveSeconds, operationId: input.operationId });
     return entitlement;
   }
 
+  /** Backwards-compatible guard entrypoint; new generation paths pass an operation ID explicitly. */
+  async assertGenerationInterval(input: { accountId: string; workspaceId: string; channelId: string; operationId?: string; source?: string }): Promise<Entitlement> {
+    return this.tryAcquireGenerationSlot({ ...input, operationId: input.operationId || `generation-check:${crypto.randomUUID()}`, source: input.source || 'generation-gate' });
+  }
+
+  /** The timestamp is reserved at acquisition; completion does not reopen or move the slot. */
   async markGenerated(channelId: string): Promise<void> {
-    await getDatabaseClient().query(
-      `INSERT INTO editorial_runtime_state (channel_id, last_generated_at, updated_at)
-       VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT (channel_id) DO UPDATE SET last_generated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`, [channelId]
-    );
+    await getDatabaseClient().query('UPDATE editorial_runtime_state SET updated_at = CURRENT_TIMESTAMP WHERE channel_id = $1', [channelId]);
   }
 
   private async audit(input: { workspaceId?: string; channelId?: string; accountId: string; operation: PremiumOperation; source: string }, action: string, metadata: Record<string, unknown>): Promise<void> {

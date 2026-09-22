@@ -54,66 +54,47 @@ export class ResilientAiProvider implements AiProviderBundle {
     this.providerName = `ResilientAiProvider [Primary: ${this.primary.providerName}, Fallback: ${this.fallback.providerName}]`;
   }
 
+  /** Configured, non-demo providers available to production operations. */
+  private productionProviders(): AiProviderBundle[] {
+    return [...new Set([this.primary, this.fallback].filter((provider) => provider !== this.mock))];
+  }
+
+  private async withProductionProvider<T>(operation: string, invoke: (provider: AiProviderBundle) => Promise<T>): Promise<T> {
+    const providers = this.productionProviders();
+    if (!providers.length) throw new Error(`No configured production AI provider is available for ${operation}`);
+    let lastError: unknown;
+    for (const provider of providers) {
+      try { return await invoke(provider); }
+      catch (error) { lastError = error; console.warn(`${operation} provider ${provider.providerName} failed; trying configured fallback`, error); }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`All configured production providers failed for ${operation}`);
+  }
+
   async generateText(systemPrompt: string, userPrompt: string): Promise<string> {
     if (this.isDemoMode) return this.mock.generateText(systemPrompt, userPrompt);
-    try {
-      return await this.primary.generateText(systemPrompt, userPrompt);
-    } catch (err) {
-      console.warn(`Primary AI text provider failed, failing over to fallback:`, err);
-      try {
-        return await this.fallback.generateText(systemPrompt, userPrompt);
-      } catch (fErr) {
-        console.warn(`Fallback AI text provider failed, falling back to mock provider:`, fErr);
-        return this.mock.generateText(systemPrompt, userPrompt);
-      }
-    }
+    return this.withProductionProvider('text generation', (provider) => provider.generateText(systemPrompt, userPrompt));
   }
 
   async searchAndGround(input: any): Promise<any> {
     if (this.isDemoMode) return this.mock.searchAndGround(input);
-    try {
-      return await this.primary.searchAndGround(input);
-    } catch (err) {
-      console.warn(`Primary AI research provider failed, failing over to fallback:`, err);
-      try {
-        return await this.fallback.searchAndGround(input);
-      } catch (fErr) {
-        console.warn(`Fallback AI research provider failed, falling back to mock:`, fErr);
-        return this.mock.searchAndGround(input);
-      }
-    }
+    // Research is evidence-bearing input. Production must never turn an
+    // unavailable configured provider into a manufactured mock candidate.
+    return this.withProductionProvider('research grounding', (provider) => provider.searchAndGround(input));
   }
 
   async generateImage(prompt: string): Promise<{ url: string; revisedPrompt?: string }> {
     if (this.isDemoMode) return this.mock.generateImage(prompt);
-    try {
-      return await this.primary.generateImage(prompt);
-    } catch (err) {
-      return this.mock.generateImage(prompt);
-    }
+    return this.withProductionProvider('image generation', (provider) => provider.generateImage(prompt));
   }
 
   async generateStructuredDraft(topic: string, candidate: any, channelLanguage: string): Promise<any> {
     if (this.isDemoMode) return this.mock.generateStructuredDraft(topic, candidate, channelLanguage);
-    try {
-      return await this.primary.generateStructuredDraft(topic, candidate, channelLanguage);
-    } catch (err) {
-      console.warn(`Primary structured draft provider failed, trying fallback:`, err);
-      try {
-        return await this.fallback.generateStructuredDraft(topic, candidate, channelLanguage);
-      } catch (fErr) {
-        return this.mock.generateStructuredDraft(topic, candidate, channelLanguage);
-      }
-    }
+    return this.withProductionProvider('structured draft generation', (provider) => provider.generateStructuredDraft(topic, candidate, channelLanguage));
   }
 
   async reviseDraft(existingDraft: any, instruction: string): Promise<any> {
     if (this.isDemoMode) return this.mock.reviseDraft(existingDraft, instruction);
-    try {
-      return await this.primary.reviseDraft(existingDraft, instruction);
-    } catch (err) {
-      return this.mock.reviseDraft(existingDraft, instruction);
-    }
+    return this.withProductionProvider('draft revision', (provider) => provider.reviseDraft(existingDraft, instruction));
   }
 }
 

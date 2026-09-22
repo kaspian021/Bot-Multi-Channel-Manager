@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:acceptance": "vitest run tests/acceptance.test.ts tests/phase2.acceptance.test.ts tests/phase3.acceptance.test.ts tests/phase4.acceptance.test.ts tests/phase4-hardening.test.ts",
     "test:smoke": "tsx scripts/run-production-smoke-test.ts",
+    "test:postgres:phase4": "tsx scripts/verify-postgres-phase4.ts",
     "verify:phase4-demo": "tsx scripts/run-phase4-demo-verification.ts",
     "seed": "tsx src/infrastructure/database/seed-runner.ts",
     "lint": "next lint"

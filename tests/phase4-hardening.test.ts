@@ -8,11 +8,15 @@ import { getDatabaseClient, IDatabaseClient, resetDatabaseClientForTesting } fro
 import { AccountLinkingService } from '../src/application/services/account-linking-service';
 import { resolveTenantContext } from '../src/application/services/tenant-context-service';
 import { IntegrationAuthenticationError } from '../src/infrastructure/security/trusted-integration-auth';
-import { IntegrationOutboxService, UsageMeter } from '../src/application/services/entitlement-service';
+import { EntitlementGuard, IntegrationOutboxService, UsageMeter } from '../src/application/services/entitlement-service';
 import { SubscriptionService } from '../src/application/services/subscription-service';
 import { SubscriptionStatus } from '../src/domain/types';
 import { EditorialPlanningService } from '../src/application/services/editorial-planning-service';
 import { BackgroundJobOrchestrator } from '../src/infrastructure/background/job-orchestrator';
+import { ResearchService } from '../src/application/services/research-service';
+import { ResilientAiProvider } from '../src/infrastructure/ai/ai-provider-factory';
+import { GeminiSearchGroundingProvider } from '../src/infrastructure/research/gemini-search-grounding-provider';
+import { OpenAiWebSearchProvider } from '../src/infrastructure/research/openai-web-search-provider';
 import { POST as createChannel } from '../src/app/api/channels/route';
 import { GET as getChannelSources } from '../src/app/api/channels/[id]/sources/route';
 import { GET as getChannelBrain } from '../src/app/api/channels/[id]/brain/route';
@@ -110,6 +114,50 @@ describe.sequential('Phase 4 production hardening', () => {
     expect(await meter.reserve({ accountId, workspaceId, productKey: product, metric: 'CONTENT_GENERATION', maximum: 1, source: 'test', idempotencyKey: key })).toBe(true);
     expect(await meter.usageToday({ accountId, workspaceId, productKey: product, metric: 'CONTENT_GENERATION' })).toBe(1);
     expect(JSON.parse((await db.query('SELECT metadata FROM usage_events WHERE idempotency_key=$1', [key])).rows[0].metadata).reservationState).toBe('FAILED');
+  });
+
+  it('PH4-H-01 atomically permits only one concurrent generation slot per channel', async () => {
+    const channel = `ch-slot-${Date.now()}`; await db.query(`INSERT INTO channels(id,workspace_id,name,language,status,posting_frequency,timezone) VALUES($1,$2,'Slot','en','ACTIVE',1,'UTC')`, [channel, workspaceId]);
+    const acquire = (operationId: string) => new EntitlementGuard().tryAcquireGenerationSlot({ accountId, workspaceId, channelId: channel, operationId, source: 'hardening-test' });
+    const results = await Promise.allSettled([acquire('slot-a'), acquire('slot-b')]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const blocked = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
+    expect(blocked.reason.code).toBe('GENERATION_INTERVAL_BLOCKED');
+  });
+
+  it('PH4-H-02 rejected generation slot does not consume AI quota', async () => {
+    const channel = `ch-slot-quota-${Date.now()}`; await db.query(`INSERT INTO channels(id,workspace_id,name,language,status,posting_frequency,timezone) VALUES($1,$2,'Slot quota','en','ACTIVE',1,'UTC')`, [channel, workspaceId]);
+    const operations = ['slot-quota-a', 'slot-quota-b'];
+    const results = await Promise.allSettled(operations.map((operationId) => new EntitlementGuard().tryAcquireGenerationSlot({ accountId, workspaceId, channelId: channel, operationId, source: 'hardening-test' }).then(() => operationId)));
+    const winner = results.find((result) => result.status === 'fulfilled') as PromiseFulfilledResult<string>;
+    await new EntitlementGuard().assert({ accountId, workspaceId, channelId: channel, operation: 'GENERATE', source: 'hardening-test', idempotencyKey: winner.value });
+    const usage = await db.query(`SELECT metric FROM usage_events WHERE account_id=$1 AND channel_id=$2 AND metric IN ('CONTENT_GENERATION','AI_REQUEST')`, [accountId, channel]);
+    expect(usage.rowCount).toBe(2);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('PH4-H-03 production multilingual research does not inject synthetic candidates', async () => {
+    const channel = `ch-research-prod-${Date.now()}`; await db.query(`INSERT INTO channels(id,workspace_id,name,language,status,posting_frequency,timezone) VALUES($1,$2,'Production research','en','ACTIVE',1,'UTC')`, [channel, workspaceId]);
+    process.env.DEMO_MODE = 'false';
+    const research = new ResearchService(); (research as any).web = { fetchCandidates: async () => [] };
+    const result = await research.executeResearchRun(channel);
+    expect(result.candidatesFound).toBe(0);
+    expect((await db.query(`SELECT * FROM content_candidates WHERE channel_id=$1`, [channel])).rowCount).toBe(0);
+    // Unconfigured research/AI providers must fail closed rather than inject
+    // their legacy synthetic results into a production research path.
+    expect(await new GeminiSearchGroundingProvider('placeholder').search('German and Japanese AI')).toEqual([]);
+    expect(await new OpenAiWebSearchProvider('placeholder').search('German and Japanese AI')).toEqual([]);
+    await expect(new ResilientAiProvider('unconfigured', 'unconfigured', false).searchAndGround({ topics: ['AI'] })).rejects.toThrow('No configured production AI provider');
+    process.env.DEMO_MODE = 'true';
+  });
+
+  it('PH4-H-04 demo mode keeps explicitly named multilingual fixtures available', async () => {
+    const channel = `ch-research-demo-${Date.now()}`; await db.query(`INSERT INTO channels(id,workspace_id,name,language,status,posting_frequency,timezone) VALUES($1,$2,'Demo research','en','ACTIVE',1,'UTC')`, [channel, workspaceId]);
+    process.env.DEMO_MODE = 'true';
+    const research = new ResearchService(); (research as any).web = { fetchCandidates: async () => [] };
+    const result = await research.executeResearchRun(channel);
+    expect(result.candidates.some((candidate) => candidate.author?.includes('Demo German Research Fixture'))).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.author?.includes('Demo Japanese Research Fixture'))).toBe(true);
   });
 
   it('deduplicates equivalent pending strategy recommendations across repeated evaluations', async () => {

@@ -3,6 +3,7 @@
 // Implements ITelegramPublisher and ITelegramOwnerMessenger
 // ==============================================================
 
+import crypto from 'crypto';
 import {
   ITelegramPublisher,
   ITelegramOwnerMessenger,
@@ -189,7 +190,7 @@ export class RealTelegramClient implements ITelegramPublisher, ITelegramOwnerMes
 
     // Persist completed publishing lock
     if (idempotencyKey) {
-      const lockId = `lock-${Date.now()}`;
+      const lockId = `lock-${crypto.randomUUID()}`;
       await db.query(
         `INSERT INTO publishing_locks (id, post_id, channel_id, expires_at, worker_id, idempotency_key, status, telegram_message_id, telegram_message_url)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '1 day', 'worker-main', $2, 'COMPLETED', $4, $5)

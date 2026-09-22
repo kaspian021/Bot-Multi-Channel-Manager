@@ -38,24 +38,11 @@ export class YouTubeConnector implements IContentSourceConnector {
   }
 
   async fetchCandidates(source: ContentSource, topics: string[]): Promise<RawResearchCandidate[]> {
-    if (process.env.DEMO_MODE === 'true' || !this.apiKey) {
-      return [
-        {
-          title: `Technical Deep-Dive: Building Agentic Workflows with Model Context Protocol`,
-          url: `https://youtube.com/watch?v=demo_mcp_agent`,
-          sourceName: 'AI Engineering Talks (YouTube)',
-          publishedAt: new Date().toISOString(),
-          summary: `Comprehensive walkthrough covering protocol architecture, schema definition, and local tool execution security boundaries.`,
-          claims: [
-            'Demonstrates JSON-RPC 2.0 communication over local stdio streams',
-            'Shows sandboxed file system provider implementation',
-          ],
-          relevanceScore: 88,
-          noveltyScore: 84,
-          technicalDepthScore: 92,
-        },
-      ];
+    if (process.env.DEMO_MODE === 'true') {
+      return [{ title: 'Demo: Agentic Workflows with Model Context Protocol', url: 'https://example.invalid/demo/youtube-mcp', sourceName: 'Demo YouTube Fixture', publishedAt: new Date().toISOString(), summary: 'Demo-only connector fixture.', claims: ['Demo fixture: JSON-RPC local tool execution'], relevanceScore: 88, noveltyScore: 84, technicalDepthScore: 92 }];
     }
+    // Never substitute an invented result for a missing production connector.
+    if (!this.apiKey) return [];
 
     // Official YouTube Data API v3 implementation
     try {
@@ -90,22 +77,12 @@ export class RedditConnector implements IContentSourceConnector {
   }
 
   async fetchCandidates(source: ContentSource, topics: string[]): Promise<RawResearchCandidate[]> {
-    // In DEMO_MODE or without OAuth, return mock high-signal candidate
-    return [
-      {
-        title: `LocalLLaMA: Benchmark of 4-bit FP4 quantization vs AWQ on consumer RTX GPUs`,
-        url: 'https://reddit.com/r/LocalLLaMA/comments/demo_quant_benchmark',
-        sourceName: 'Reddit r/LocalLLaMA',
-        publishedAt: new Date().toISOString(),
-        summary: `Community members benchmarked novel 4-bit quantization kernels, demonstrating 28% higher token generation rate with zero perplexity degradation.`,
-        claims: [
-          'Evaluated across 70B parameter models on dual RTX 3090 setup',
-          'Reproducible scripts and weights uploaded to Hugging Face',
-        ],
-        relevanceScore: 89,
-        noveltyScore: 87,
-        technicalDepthScore: 91,
-      },
-    ];
+    if (process.env.DEMO_MODE === 'true') {
+      return [{ title: 'Demo: FP4 quantization benchmark', url: 'https://example.invalid/demo/reddit-quantization', sourceName: 'Demo Reddit Fixture', publishedAt: new Date().toISOString(), summary: 'Demo-only community connector fixture.', claims: ['Demo fixture: quantization benchmark'], relevanceScore: 89, noveltyScore: 87, technicalDepthScore: 91 }];
+    }
+    // A production Reddit adapter must use configured OAuth/fetched data. Until
+    // that adapter is configured, fail closed with no manufactured candidate.
+    void source; void topics;
+    return [];
   }
 }

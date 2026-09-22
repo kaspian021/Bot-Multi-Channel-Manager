@@ -8,7 +8,7 @@ AI Channel Manager owns workspace operations, channel brains, research, drafts, 
 
 `accounts` holds an external provider/user reference. `workspace_members` is authoritative for `OWNER`, `ADMIN`, `EDITOR`, `APPROVER`, and `VIEWER` authorization; `workspaces.owner_user_id` remains only as legacy compatibility data.
 
-A request is resolved once to `TenantContext` and channel/draft guards verify that resource IDs belong to the selected workspace. Production does not infer a tenant from an ID or from a global Telegram owner. At a trusted website boundary, provide external identity headers (`x-external-provider`, `x-external-user-id`) and optional selected `x-workspace-id`; missing production identity fails closed.
+A request is resolved once to `TenantContext` and channel/draft guards verify that resource IDs belong to the selected workspace. Production does not infer a tenant from an ID or from a global Telegram owner. Unsigned external identity/account headers are rejected: a trusted product-to-product caller must authenticate the assertion with the signed integration contract; missing production identity fails closed.
 
 Telegram linking creates a cryptographically random opaque token, persists only a SHA-256 hash, uses a short TTL, atomically consumes it, and refuses reassignment of an already-linked numeric Telegram ID. `/account`, `/workspaces`, `/workspace <id>`, `/channels`, and `/use <channel-id>` maintain a persistent Telegram user context.
 
@@ -31,12 +31,14 @@ Upgrades apply as a new active entitlement immediately. Downgrades with a future
 
 AI quota is **charged on a reserved attempt**, not only on a successful provider response. Reservation events carry `RESERVED`, `SUCCESSFUL`, `FAILED`, or `REJECTED` state in metadata. Retrying the same operation idempotency key reuses its original reservation and cannot double-charge or create unlimited new reservations; a new operation key is a new attempt.
 
-Generation has a non-bypassable platform floor:
+Generation has a non-bypassable platform floor and database-atomic slot reservation before any AI call:
 
 ```text
 effective interval = max(entitlement.generationIntervalSeconds,
                          PLATFORM_MIN_GENERATION_INTERVAL_SECONDS)
 ```
+
+`tryAcquireGenerationSlot` conditionally updates the channel runtime row. Only one concurrent worker, API request, or Telegram command can claim a channel slot; the loser receives `GENERATION_INTERVAL_BLOCKED` before usage quota is reserved. A failed provider call keeps its attempt-charged reservation and slot, preventing retry storms.
 
 Research cadence (`researchIntervalSeconds`) is separate. At due publish time `PublishingService` resolves entitlement again. Failed entitlement marks the scheduled post `BLOCKED_ENTITLEMENT` and produces `SCHEDULE_BLOCKED_ENTITLEMENT`; it stays blocked after reactivation to avoid a catch-up burst.
 
@@ -61,6 +63,16 @@ Every `/api/integrations/v1` route is service-to-service only. It requires `X-In
 
 The worker iterates all active channels fairly in a rotating bounded order, refreshes research only when research is due, builds plans, and uses a database runtime lock before generating a single selected candidate. It never relies on `LIMIT 1` channel selection.
 
-`DEMO_MODE=true` creates isolated fixtures: one demo account, linked Telegram identity, workspace, two channels, active subscription/entitlement, and usage. Demo-only fixture IDs never participate in production routing.
+`DEMO_MODE=true` creates isolated fixtures: one demo account, linked Telegram identity, workspace, two channels, active subscription/entitlement, and usage. Demo-only fixture IDs never participate in production routing. Mock AI output and synthetic research fixtures are available only in this explicit mode; production uses configured providers/source fetches or fails closed rather than manufacturing evidence or drafts.
 
 Run `npm run verify:phase4-demo` locally after seeding to execute a deterministic stored research candidate → generated draft → Telegram approval → scheduled publish flow. It then expires the entitlement before a second due post, verifies `BLOCKED_ENTITLEMENT`, restores the entitlement, and confirms the blocked item is not published as catch-up. The JSON result includes usage and audit evidence.
+
+## PostgreSQL concurrency verification
+
+The normal test suite verifies PGlite behavior. To run the same transaction rollback, atomic outbox claim, concurrent channel quota, and atomic generation-slot suite against an external PostgreSQL instance, set `DATABASE_CONNECTION_STRING=postgresql://…` and run:
+
+```bash
+npm run test:postgres:phase4
+```
+
+This command rejects a missing/non-PostgreSQL connection string rather than claiming external verification. **PGlite verification: passed. External PostgreSQL verification: not run in this repository sandbox.**

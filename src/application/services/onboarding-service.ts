@@ -2,6 +2,7 @@
 // AI Conversational Onboarding Service — Section 5, 6, 7, 8
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { ChannelBrainService } from './channel-brain-service';
 import {
@@ -30,7 +31,7 @@ export class OnboardingService {
     const channel = chanRes.rows[0];
     const channelName = channel.name || 'your channel';
 
-    const sessionId = `onb-${channelId}-${Date.now()}`;
+    const sessionId = `onb-${channelId}-${crypto.randomUUID()}`;
     const initialMessage: OnboardingMessage = {
       id: `msg-1`,
       role: 'assistant',
@@ -441,7 +442,7 @@ Buttons:
     const sourceLangs = data.sourceLanguages?.length ? data.sourceLanguages : ['en', 'de', 'ja'];
 
     return {
-      id: `brain-${channelId}-${Date.now()}`,
+      id: `brain-${channelId}-${crypto.randomUUID()}`,
       channelId,
       version: 1,
       status: 'PENDING_APPROVAL',

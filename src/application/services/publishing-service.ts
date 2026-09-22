@@ -2,6 +2,7 @@
 // Publishing Service — Section 35 & 36 Specification (Idempotent)
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { getTelegramBotService } from '../../infrastructure/telegram/telegram-bot-service';
 import { formatTelegramPost } from '../../domain/telegram-format';
@@ -113,7 +114,7 @@ export class PublishingService {
     const pubResult = await bot.publishToChannel(targetChat, formattedDraft, options.idempotencyKey || `publish:${draftId}`);
 
     // 6. Persist Published Post & update status
-    const pubId = `pub-${Date.now()}`;
+    const pubId = `pub-${crypto.randomUUID()}`;
     await db.query(
       `INSERT INTO published_posts (
         id, workspace_id, channel_id, draft_id, scheduled_post_id,

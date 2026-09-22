@@ -2,6 +2,7 @@
 // Scheduler Service — Section 26 & 48 Specification
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { PublishingService } from './publishing-service';
 import { AuditService } from './audit-service';
@@ -31,7 +32,7 @@ export class SchedulerService {
 
     validateTransition(draft.status as DraftStatus, DraftStatus.SCHEDULED);
 
-    const schedId = `sched-${Date.now()}`;
+    const schedId = `sched-${crypto.randomUUID()}`;
     const scheduledDateStr = typeof scheduledFor === 'string' ? scheduledFor : scheduledFor.toISOString();
     const idempotencyKey = `idemp-${draftId}`;
 

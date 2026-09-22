@@ -711,6 +711,10 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON integration_outbox(status, next
 CREATE INDEX IF NOT EXISTS idx_editorial_learning_channel ON editorial_learning_events(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_editorial_plans_channel_day ON editorial_plans(channel_id, plan_date);
 
+-- Generation slots are claimed atomically before AI work starts. The operation
+-- value is audit/diagnostic data; the conditional timestamp update is the lock.
+ALTER TABLE editorial_runtime_state ADD COLUMN IF NOT EXISTS generation_operation_id TEXT;
+
 -- Hardening: secure machine-call replay prevention, recommendation dedupe,
 -- and Telegram channel ownership are database-enforced invariants.
 CREATE TABLE IF NOT EXISTS integration_request_nonces (

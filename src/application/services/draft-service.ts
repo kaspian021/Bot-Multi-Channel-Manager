@@ -9,6 +9,8 @@ import { evaluateQualityGate } from '../../domain/quality-gate';
 import { validateTransition } from '../../domain/state-machine';
 import { AuditService } from './audit-service';
 import { ChannelBrainService } from './channel-brain-service';
+import { EntitlementGuard } from './entitlement-service';
+import { EditorialPlanningService } from './editorial-planning-service';
 import {
   AuditActorType,
   ContentDraft,
@@ -19,6 +21,8 @@ import {
 
 export class DraftService {
   private brainService = new ChannelBrainService();
+  private entitlementGuard = new EntitlementGuard();
+  private editorialPlanning = new EditorialPlanningService();
 
   /**
    * Generates a new ContentDraft using Channel Brain context and language settings.
@@ -38,6 +42,15 @@ export class DraftService {
     // 2. Fetch Channel, Channel Brain, and Language Settings
     const chanRes = await db.query('SELECT * FROM channels WHERE id = $1', [cand.channel_id]);
     const channel = chanRes.rows[0];
+    if (!channel) throw new Error('Candidate channel no longer exists');
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [channel.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; generation is fail-closed');
+    await this.entitlementGuard.assertGenerationInterval({ accountId, workspaceId: channel.workspace_id, channelId: channel.id });
+    await this.entitlementGuard.assert({
+      accountId, workspaceId: channel.workspace_id, channelId: channel.id,
+      operation: 'GENERATE', source: 'draft-service', idempotencyKey: `draft-generation:${candidateId}`,
+    });
 
     const brain = await this.brainService.getBrain(cand.channel_id);
     const langSettings = await this.brainService.getLanguageSettings(cand.channel_id);
@@ -168,6 +181,8 @@ export class DraftService {
       ]
     );
 
+    await this.entitlementGuard.markGenerated(channel.id);
+
     // 7. Audit Log
     await AuditService.log(
       channel.workspace_id,
@@ -207,6 +222,13 @@ export class DraftService {
       throw new Error(`Draft ${draftId} not found`);
     }
     const current = res.rows[0];
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [current.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; AI revision is fail-closed');
+    await this.entitlementGuard.assert({
+      accountId, workspaceId: current.workspace_id, channelId: current.channel_id,
+      operation: 'AI_EDIT', source: 'draft-service', idempotencyKey: `draft-revision:${draftId}:${(current.revision_count || 0) + 1}`,
+    });
 
     const whyMatters = typeof current.why_it_matters === 'string'
       ? JSON.parse(current.why_it_matters)
@@ -261,6 +283,15 @@ export class DraftService {
     } catch (prefErr) {
       console.warn('Failed to infer preference from edit:', prefErr);
     }
+    await this.editorialPlanning.recordLearning({
+      workspaceId: current.workspace_id,
+      channelId: current.channel_id,
+      draftId,
+      action: 'EDIT',
+      signalKey: 'edit_instruction',
+      signalValue: instruction.slice(0, 500),
+      metadata: { revision: newRevisionCount },
+    });
 
     await AuditService.log(
       current.workspace_id,
@@ -349,6 +380,10 @@ export class DraftService {
   ): Promise<ContentDraft & { targetLanguage: string }> {
     const langSettings = await this.brainService.getLanguageSettings(channelId);
     const targetLanguage = langSettings.contentLanguage || 'en';
+    const db = getDatabaseClient();
+    const channelRes = await db.query('SELECT workspace_id FROM channels WHERE id = $1', [channelId]);
+    if (!channelRes.rowCount) throw new Error('Channel not found');
+    const workspaceId = channelRes.rows[0].workspace_id;
 
     let synthesizedHeadline = candidate.title;
     let synthesizedBody = candidate.content || candidate.title;
@@ -369,7 +404,7 @@ export class DraftService {
 
     const draft: ContentDraft & { targetLanguage: string } = {
       id: `draft-synth-${Date.now()}`,
-      workspaceId: 'ws-demo-001',
+      workspaceId,
       channelId,
       candidateId: candidate.id || `cand-synth-${Date.now()}`,
       topic: 'Robotics & Hardware',

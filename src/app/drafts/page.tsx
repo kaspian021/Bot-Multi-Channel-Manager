@@ -279,7 +279,7 @@ export default function DraftsPage() {
                     <div>
                       <div className="flex items-center justify-between text-[10px] text-slate-500 pb-2 border-b border-slate-800">
                         <span>Telegram Post Render</span>
-                        <span className="text-blue-400">@futurestack_ai</span>
+                        <span className="text-blue-400">{draft.telegram_channel_username || 'Linked Telegram channel'}</span>
                       </div>
                       <div className="mt-3 text-xs text-slate-200 space-y-2 whitespace-pre-wrap font-sans">
                         <p className="font-bold text-white">⚡ {draft.headline}</p>

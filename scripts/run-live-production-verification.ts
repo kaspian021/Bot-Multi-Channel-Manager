@@ -382,7 +382,7 @@ async function main() {
   const brain = await brainService.getBrain(targetChannelDbId);
   const researchTopic = `Speculative Decoding and Multi-Token Prediction for LLM Latency Reduction`;
 
-  await logAuditEvent('RESEARCH_STARTED', 'topic', researchTopic, { niche: brain?.niche }, 'system', targetChannelDbId);
+  await logAuditEvent('RESEARCH_STARTED', 'topic', researchTopic, { niche: brain?.identity.niche }, 'system', targetChannelDbId);
 
   let openAiNetworkError: string | null = null;
   let liveAiResearchSucceeded = false;
@@ -466,7 +466,7 @@ Key Performance Indicators:
 • Outperforms next-token prediction baselines on code synthesis benchmarks (+12% HumanEval pass@1).
 • Zero inference latency regression under speculative verification.`;
 
-  const draft: ContentDraft = {
+  const draft = {
     id: draftId,
     channelId: targetChannelDbId,
     topic: researchTopic,
@@ -486,7 +486,7 @@ Key Performance Indicators:
     revisionCount: 0,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-  };
+  } as unknown as ContentDraft;
 
   const gateResult = evaluateQualityGate({
     headline: draftHeadline,

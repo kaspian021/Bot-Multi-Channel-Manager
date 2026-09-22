@@ -8,8 +8,11 @@ import { formatTelegramPost } from '../../domain/telegram-format';
 import { validateTransition } from '../../domain/state-machine';
 import { AuditService } from './audit-service';
 import { AuditActorType, ChannelStatus, ContentDraft, DraftStatus } from '../../domain/types';
+import { EntitlementGuard, EntitlementDeniedError } from './entitlement-service';
 
 export class PublishingService {
+  private entitlementGuard = new EntitlementGuard();
+
   /**
    * Publishes a draft idempotently to the target channel.
    */
@@ -58,7 +61,31 @@ export class PublishingService {
       return { success: false, telegramMessageId: 0, error: reason };
     }
 
-    // 4. Idempotency Check (Section 36): Check if already published
+    // 4. Re-check entitlement at publication time. An approved/scheduled draft
+    // never carries an authorization grant into a later billing period.
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [rawDraft.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    try {
+      if (!accountId) throw new EntitlementDeniedError('Workspace is not bound to an account; publication is fail-closed');
+      await this.entitlementGuard.assert({
+        accountId,
+        workspaceId: rawDraft.workspace_id,
+        channelId: rawDraft.channel_id,
+        operation: 'PUBLISH',
+        source: 'publishing-service',
+        idempotencyKey: options.idempotencyKey || `publish:${draftId}`,
+      });
+    } catch (error: any) {
+      const reason = error?.message || 'Entitlement denied';
+      if (options.scheduledPostId) {
+        await db.query("UPDATE scheduled_posts SET status = 'BLOCKED_ENTITLEMENT', failure_reason = $1, last_attempt_at = CURRENT_TIMESTAMP WHERE id = $2", [reason, options.scheduledPostId]);
+        await AuditService.log(rawDraft.workspace_id, rawDraft.channel_id, actorType, actorId, 'SCHEDULE_BLOCKED_ENTITLEMENT', 'SCHEDULED_POST', options.scheduledPostId, { reason });
+      }
+      await AuditService.log(rawDraft.workspace_id, rawDraft.channel_id, actorType, actorId, 'ENTITLEMENT_DENIED', 'DRAFT', draftId, { reason, at: 'publish' });
+      return { success: false, telegramMessageId: 0, error: reason };
+    }
+
+    // 5. Idempotency Check (Section 36): Check if already published
     const existingPub = await db.query('SELECT * FROM published_posts WHERE draft_id = $1', [draftId]);
     if (existingPub.rowCount > 0) {
       // Already published! Return existing message ID without sending duplicate to Telegram.
@@ -79,8 +106,11 @@ export class PublishingService {
     };
 
     // 5. Send to Telegram
-    const targetChat = channel.telegram_chat_id || '@futurestack_ai';
-    const pubResult = await bot.publishToChannel(targetChat, formattedDraft);
+    const targetChat = channel.telegram_chat_id;
+    if (!targetChat) {
+      return { success: false, telegramMessageId: 0, error: 'Channel is not linked to a Telegram chat' };
+    }
+    const pubResult = await bot.publishToChannel(targetChat, formattedDraft, options.idempotencyKey || `publish:${draftId}`);
 
     // 6. Persist Published Post & update status
     const pubId = `pub-${Date.now()}`;

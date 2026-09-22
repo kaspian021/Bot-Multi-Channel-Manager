@@ -1,30 +1,7 @@
-// ==============================================================
-// Channel Language Settings API (GET, PUT)
-// ==============================================================
-
 import { NextRequest, NextResponse } from 'next/server';
 import { ChannelBrainService } from '@/application/services/channel-brain-service';
-import { seedDatabase } from '@/infrastructure/database/seed';
-
-export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  await seedDatabase(false);
-  const brainService = new ChannelBrainService();
-  const settings = await brainService.getLanguageSettings(params.id);
-  if (!settings) {
-    return NextResponse.json({ error: 'Language settings not found' }, { status: 404 });
-  }
-  return NextResponse.json(settings);
-}
-
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const brainService = new ChannelBrainService();
-    const body = await req.json();
-    const saved = await brainService.updateLanguageSettings(params.id, body);
-    return NextResponse.json(saved);
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to update Language Settings' }, { status: 500 });
-  }
-}
+import { apiError, tenantFor } from '@/app/api/api-helpers';
+import { requireChannelAccess, requireWorkspaceRole } from '@/application/services/tenant-context-service';
+export const dynamic='force-dynamic';
+export async function GET(req:NextRequest,{params}:{params:{id:string}}){try{const ctx=await tenantFor(req);await requireChannelAccess(ctx,params.id);return NextResponse.json(await new ChannelBrainService().getLanguageSettings(params.id));}catch(e){return apiError(e);}}
+export async function PUT(req:NextRequest,{params}:{params:{id:string}}){try{const ctx=await tenantFor(req);requireWorkspaceRole(ctx,'EDITOR');await requireChannelAccess(ctx,params.id,'EDITOR');return NextResponse.json(await new ChannelBrainService().updateLanguageSettings(params.id,await req.json()));}catch(e){return apiError(e);}}

@@ -254,8 +254,10 @@ export class ChannelBrainService {
       ]
     );
 
+    const auditChannel = await db.query<{ workspace_id: string }>('SELECT workspace_id FROM channels WHERE id = $1', [channelId]);
+    if (!auditChannel.rowCount) throw new Error('Channel not found for Channel Brain audit');
     await AuditService.log(
-      'ws-demo-001',
+      auditChannel.rows[0].workspace_id,
       channelId,
       changedBy === 'owner' ? AuditActorType.OWNER : AuditActorType.AI_WORKER,
       changedBy,

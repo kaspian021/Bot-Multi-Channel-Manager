@@ -7,9 +7,11 @@ import { PublishingService } from './publishing-service';
 import { AuditService } from './audit-service';
 import { AuditActorType, DraftStatus } from '../../domain/types';
 import { validateTransition } from '../../domain/state-machine';
+import { EntitlementGuard, EntitlementDeniedError } from './entitlement-service';
 
 export class SchedulerService {
   private publishingService = new PublishingService();
+  private entitlementGuard = new EntitlementGuard();
 
   /**
    * Schedules an approved draft for future publishing.
@@ -22,6 +24,10 @@ export class SchedulerService {
       throw new Error(`Draft ${draftId} not found`);
     }
     const draft = draftRes.rows[0];
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [draft.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; scheduling is fail-closed');
+    await this.entitlementGuard.assert({ accountId, workspaceId: draft.workspace_id, channelId: draft.channel_id, operation: 'SCHEDULE', source: 'scheduler-service' });
 
     validateTransition(draft.status as DraftStatus, DraftStatus.SCHEDULED);
 

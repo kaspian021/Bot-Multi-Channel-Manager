@@ -1,668 +1,259 @@
 // ==============================================================
-// Telegram Bot Service & Adapter — Extended with Phase 2 & 3
-// Supports Real Telegram Bot API + Simulator + Idempotent Publishing
+// Tenant-aware Telegram bot adapter — Phase 4
 // ==============================================================
 
-import { ContentDraft, DraftStatus, Claim, EvidenceItem } from '../../domain/types';
+import { ContentDraft, Claim } from '../../domain/types';
 import { formatTelegramPost, buildApprovalNotificationText } from '../../domain/telegram-format';
 import { getDatabaseClient } from '../database/db-client';
 import { OnboardingService } from '../../application/services/onboarding-service';
 import { ChannelBrainService } from '../../application/services/channel-brain-service';
+import { PublishingService } from '../../application/services/publishing-service';
+import { SchedulerService } from '../../application/services/scheduler-service';
+import { AccountLinkingService } from '../../application/services/account-linking-service';
+import { AuditService } from '../../application/services/audit-service';
 import { RealTelegramClient } from './real-telegram-client';
+import { requireChannelAccess, requireWorkspaceRole, resolveTelegramTenantContext, selectTelegramChannel, selectTelegramWorkspace, TenantContext } from '../../application/services/tenant-context-service';
+import { EditorialPlanningService } from '../../application/services/editorial-planning-service';
 
-export interface TelegramInlineButton {
-  text: string;
-  callback_data: string;
-}
-
-export interface TelegramOutgoingMessage {
-  id: number;
-  chatId: string | number;
-  text: string;
-  replyMarkup?: {
-    inline_keyboard: TelegramInlineButton[][];
-  };
-  sentAt: string;
-  photoUrl?: string;
-}
-
+export interface TelegramInlineButton { text: string; callback_data: string; }
+export interface TelegramOutgoingMessage { id: number; chatId: string | number; text: string; replyMarkup?: { inline_keyboard: TelegramInlineButton[][] }; sentAt: string; photoUrl?: string; }
 export interface TelegramUpdate {
   update_id: number;
-  message?: {
-    message_id: number;
-    from: { id: number; is_bot: boolean; first_name: string; username?: string };
-    chat: { id: number; type: string };
-    date: number;
-    text?: string;
-  };
-  callback_query?: {
-    id: string;
-    from: { id: number; is_bot: boolean; first_name: string; username?: string };
-    message?: { message_id: number; chat: { id: number } };
-    data: string;
-  };
+  message?: { message_id: number; from: { id: number; is_bot: boolean; first_name: string; username?: string }; chat: { id: number; type: string }; date: number; text?: string };
+  callback_query?: { id: string; from: { id: number; is_bot: boolean; first_name: string; username?: string }; message?: { message_id: number; chat: { id: number } }; data: string };
 }
 
-// In-memory message store for simulation & review
 const simulatedMessages: TelegramOutgoingMessage[] = [];
 let nextMessageId = 1000;
 
 export class TelegramBotService {
-  private botToken: string;
-  private ownerUserId: number;
-  private isDemoMode: boolean;
-  private onboardingService = new OnboardingService();
-  private brainService = new ChannelBrainService();
-  private realClient: RealTelegramClient;
+  private readonly botToken: string;
+  private readonly demoOwnerUserId: number;
+  private readonly isDemoMode: boolean;
+  private readonly onboarding = new OnboardingService();
+  private readonly brain = new ChannelBrainService();
+  private readonly realClient: RealTelegramClient;
 
   constructor(token?: string, ownerId?: number | string, demoMode?: boolean) {
     this.botToken = token || process.env.TELEGRAM_BOT_TOKEN || '';
-    this.ownerUserId = parseInt(String(ownerId || process.env.TELEGRAM_OWNER_USER_ID || '987654321'), 10);
     this.isDemoMode = demoMode ?? (process.env.DEMO_MODE === 'true' || !this.botToken || this.botToken.startsWith('demo_'));
+    // Legacy env value is read only for the explicit demo simulator fallback.
+    this.demoOwnerUserId = this.isDemoMode ? Number(ownerId || process.env.TELEGRAM_OWNER_USER_ID || '987654321') : Number.NaN;
     this.realClient = new RealTelegramClient(this.botToken);
   }
 
-  isConfigured(): boolean {
-    return Boolean(this.botToken && this.botToken.length > 10 && !this.botToken.startsWith('demo_'));
-  }
+  isConfigured(): boolean { return Boolean(this.botToken && this.botToken.length > 10 && !this.botToken.startsWith('demo_')); }
+  getSimulatedMessages(): TelegramOutgoingMessage[] { return [...simulatedMessages]; }
+  clearSimulatedMessages(): void { simulatedMessages.length = 0; }
 
-  getSimulatedMessages(): TelegramOutgoingMessage[] {
-    return [...simulatedMessages];
-  }
+  /** Compatibility helper only. Production authorization resolves DB identity/membership asynchronously. */
+  isAuthorizedOwner(userId: number): boolean { return this.isDemoMode && userId === this.demoOwnerUserId; }
+  async verifyChannel(channelChatId: string) { return this.realClient.verifyChannel(channelChatId); }
+  async sendTestMessage(channelChatId: string) { return this.realClient.sendTestMessage(channelChatId); }
+  async updateChannelMetadata(channelChatId: string, metadata: { title?: string; description?: string; photoBuffer?: Buffer }) { return this.realClient.updateChannelMetadata(channelChatId, metadata); }
 
-  clearSimulatedMessages(): void {
-    simulatedMessages.length = 0;
-  }
-
-  /**
-   * Verifies that the sender is the configured owner (Section 9)
-   */
-  isAuthorizedOwner(userId: number): boolean {
-    return userId === this.ownerUserId;
-  }
-
-  /**
-   * Verifies administrator permissions and post access on target channel (Section 35 & 81).
-   */
-  async verifyChannel(channelChatId: string) {
-    return this.realClient.verifyChannel(channelChatId);
-  }
-
-  /**
-   * Sends verified test message to target channel (Section 76).
-   */
-  async sendTestMessage(channelChatId: string) {
-    return this.realClient.sendTestMessage(channelChatId);
-  }
-
-  /**
-   * Updates channel metadata (title, description) with owner approval (Section 45).
-   */
-  async updateChannelMetadata(channelChatId: string, metadata: { title?: string; description?: string; photoBuffer?: Buffer }) {
-    return this.realClient.updateChannelMetadata(channelChatId, metadata);
-  }
-
-  /**
-   * Formats draft notification and buttons according to owner communication language (Section 4 & 21)
-   */
   formatDraftNotification(draft: ContentDraft, ownerLanguage = 'en'): { text: string; inlineKeyboard: TelegramInlineButton[][] } {
-    const text = buildApprovalNotificationText(draft, ownerLanguage);
-
-    const isFa = ownerLanguage === 'fa';
-    const inlineKeyboard: TelegramInlineButton[][] = [
-      [
-        { text: isFa ? '✅ تأیید (Approve)' : '✅ Approve', callback_data: `APPROVE_DRAFT:${draft.id}` },
-        { text: isFa ? '✏️ ویرایش (Edit)' : '✏️ Edit', callback_data: `EDIT_DRAFT:${draft.id}` },
-        { text: isFa ? '❌ رد (Reject)' : '❌ Reject', callback_data: `REJECT_DRAFT:${draft.id}` },
-      ],
-      [
-        { text: isFa ? '⏰ تغییر زمان' : '⏰ Change Time', callback_data: `CHANGE_TIME:${draft.id}` },
-        { text: isFa ? '🔎 شواهد (Evidence)' : '🔎 Evidence', callback_data: `VIEW_EVIDENCE:${draft.id}` },
-        { text: isFa ? '📚 منابع (Sources)' : '📚 Sources', callback_data: `VIEW_SOURCES:${draft.id}` },
-      ],
-    ];
-
-    return { text, inlineKeyboard };
-  }
-
-  /**
-   * Sends draft proposal to owner with interactive action buttons (Section 4, 21, 24)
-   */
-  async sendDraftForApproval(draft: ContentDraft, ownerLanguage = 'en'): Promise<TelegramOutgoingMessage> {
-    const { text, inlineKeyboard } = this.formatDraftNotification(draft, ownerLanguage);
-    return this.sendMessage(this.ownerUserId, text, inlineKeyboard);
-  }
-
-  /**
-   * Sends prompt asking owner for publishing choice after APPROVE (Section 4)
-   */
-  async sendPublishChoicePrompt(draftId: string, suggestedTime: string, ownerLanguage = 'en'): Promise<TelegramOutgoingMessage> {
-    const isFa = ownerLanguage === 'fa';
-    const text = isFa
-      ? `✅ *پیش‌نویس تأیید شد.*\n\n*زمان پیشنهادی انتشار:* ${suggestedTime}\n\nآیا مایلید هم‌اکنون منتشر شود یا در زمان پیشنهادی زمان‌بندی گردد؟`
-      : `✅ *Draft Approved.*\n\n*Suggested time:* ${suggestedTime}\n\nWould you like to publish now or keep the scheduled time?`;
-
-    const inlineKeyboard: TelegramInlineButton[][] = [
-      [
-        { text: isFa ? '🚀 انتشار هم‌اکنون' : '🚀 Publish now', callback_data: `PUBLISH_NOW:${draftId}` },
-        { text: isFa ? `🕐 زمان‌بندی (${suggestedTime})` : `🕐 Keep ${suggestedTime}`, callback_data: `KEEP_TIME:${draftId}` },
-      ],
-      [
-        { text: isFa ? '⏰ انتخاب زمان دیگر' : '⏰ Choose another time', callback_data: `CHANGE_TIME:${draftId}` },
-      ],
-    ];
-
-    return this.sendMessage(this.ownerUserId, text, inlineKeyboard);
-  }
-
-  /**
-   * Publishes post directly to Telegram channel with lock & idempotency (Section 19 & 41-43)
-   */
-  async publishToChannel(
-    channelChatId: string,
-    draft: ContentDraft,
-    idempotencyKey?: string
-  ): Promise<{ messageId: number; messageUrl?: string; success: boolean }> {
-    const postText = formatTelegramPost(draft);
-
-    // If production client is available and not in demo mode, publish through Real Telegram Client
-    if (this.isConfigured() && !this.isDemoMode) {
-      return this.realClient.publishPost(channelChatId, postText, draft.mediaUrl, idempotencyKey);
-    }
-
-    // High-Fidelity Simulation / Demo Mode
-    const msg = await this.sendMessage(channelChatId, postText);
-    const messageUrl = channelChatId.startsWith('@')
-      ? `https://t.me/${channelChatId.replace('@', '')}/${msg.id}`
-      : undefined;
-
+    const fa = ownerLanguage === 'fa';
     return {
-      messageId: msg.id,
-      messageUrl,
-      success: true,
+      text: buildApprovalNotificationText(draft, ownerLanguage),
+      inlineKeyboard: [
+        [{ text: fa ? '✅ تأیید' : '✅ Approve', callback_data: `APPROVE_DRAFT:${draft.id}` }, { text: fa ? '✏️ ویرایش' : '✏️ Edit', callback_data: `EDIT_DRAFT:${draft.id}` }, { text: fa ? '❌ رد' : '❌ Reject', callback_data: `REJECT_DRAFT:${draft.id}` }],
+        [{ text: fa ? '⏰ تغییر زمان' : '⏰ Change Time', callback_data: `CHANGE_TIME:${draft.id}` }, { text: fa ? '🔎 شواهد' : '🔎 Evidence', callback_data: `VIEW_EVIDENCE:${draft.id}` }, { text: fa ? '📚 منابع' : '📚 Sources', callback_data: `VIEW_SOURCES:${draft.id}` }],
+      ],
     };
   }
 
-  /**
-   * Sends generic Telegram message (via real Telegram Bot API or mock simulation)
-   */
-  async sendMessage(
-    chatId: string | number,
-    text: string,
-    inlineKeyboard?: TelegramInlineButton[][],
-    photoUrl?: string
-  ): Promise<TelegramOutgoingMessage> {
-    const messageRecord: TelegramOutgoingMessage = {
-      id: nextMessageId++,
-      chatId,
-      text,
-      replyMarkup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
-      sentAt: new Date().toISOString(),
-      photoUrl,
-    };
-
-    simulatedMessages.push(messageRecord);
-
-    if (this.isConfigured() && !this.isDemoMode) {
-      try {
-        const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text,
-            parse_mode: 'Markdown',
-            reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
-          }),
-        });
-      } catch (err) {
-        console.warn('Real Telegram sendMessage call failed, falling back to recorded message:', err);
-      }
-    }
-
-    return messageRecord;
-  }
-
-  /**
-   * Handles incoming Telegram webhook update or simulated owner action (Section 9, 22, 26, 39, 65, 66)
-   */
-  async handleUpdate(update: TelegramUpdate): Promise<{ handled: boolean; responseText: string }> {
+  async sendDraftForApproval(draft: ContentDraft, ownerLanguage = 'en'): Promise<TelegramOutgoingMessage> {
     const db = getDatabaseClient();
+    const recipient = await db.query<{ telegram_user_id: string }>(
+      `SELECT ti.telegram_user_id FROM telegram_identities ti
+       JOIN workspaces w ON w.account_id = ti.account_id
+       JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.account_id = ti.account_id
+       WHERE w.id = $1 AND ti.status = 'ACTIVE' AND wm.status = 'ACTIVE' AND wm.role IN ('OWNER', 'ADMIN', 'APPROVER')
+       ORDER BY CASE wm.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END LIMIT 1`, [draft.workspaceId]
+    );
+    const target = recipient.rows[0]?.telegram_user_id || (this.isDemoMode ? String(this.demoOwnerUserId) : undefined);
+    if (!target) throw new Error('No linked Telegram approver for workspace');
+    const notification = this.formatDraftNotification(draft, ownerLanguage);
+    return this.sendMessage(target, notification.text, notification.inlineKeyboard);
+  }
 
-    // 1. Handle Callback Queries (Button clicks)
-    if (update.callback_query) {
-      const cb = update.callback_query;
-      const senderId = cb.from.id;
-
-      if (!this.isAuthorizedOwner(senderId)) {
-        await this.sendMessage(senderId, '⚠️ Unauthorized: Only the verified channel owner can perform this action.');
-        return { handled: true, responseText: 'Unauthorized Telegram user' };
+  async sendPublishChoicePrompt(draftId: string, suggestedTime: string, ownerLanguage = 'en', recipientId?: string): Promise<TelegramOutgoingMessage> {
+    const db = getDatabaseClient();
+    let target = recipientId;
+    if (!target) {
+      const draft = await db.query<{ workspace_id: string }>('SELECT workspace_id FROM content_drafts WHERE id = $1', [draftId]);
+      if (draft.rowCount) {
+        const recipient = await db.query<{ telegram_user_id: string }>(
+          `SELECT ti.telegram_user_id FROM telegram_identities ti JOIN workspaces w ON w.account_id = ti.account_id
+           JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.account_id = ti.account_id
+           WHERE w.id = $1 AND ti.status = 'ACTIVE' AND wm.status = 'ACTIVE' AND wm.role IN ('OWNER', 'ADMIN', 'APPROVER')
+           ORDER BY CASE wm.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END LIMIT 1`, [draft.rows[0].workspace_id]
+        );
+        target = recipient.rows[0]?.telegram_user_id;
       }
+    }
+    if (!target && this.isDemoMode) target = String(this.demoOwnerUserId);
+    if (!target) throw new Error('No linked Telegram approver for workspace');
+    const fa = ownerLanguage === 'fa';
+    return this.sendMessage(target, fa ? `✅ پیش‌نویس تأیید شد. زمان پیشنهادی: ${suggestedTime}` : `✅ Draft approved. Suggested time: ${suggestedTime}`, [
+      [{ text: fa ? '🚀 انتشار اکنون' : '🚀 Publish now', callback_data: `PUBLISH_NOW:${draftId}` }, { text: fa ? '🕐 زمان‌بندی' : '🕐 Keep schedule', callback_data: `KEEP_TIME:${draftId}` }],
+    ]);
+  }
 
-      const [action, targetId] = cb.data.split(':');
+  async publishToChannel(channelChatId: string, draft: ContentDraft, idempotencyKey?: string): Promise<{ messageId: number; messageUrl?: string; success: boolean }> {
+    if (this.isConfigured() && !this.isDemoMode) return this.realClient.publishPost(channelChatId, formatTelegramPost(draft), draft.mediaUrl, idempotencyKey);
+    const message = await this.sendMessage(channelChatId, formatTelegramPost(draft));
+    return { success: true, messageId: message.id, messageUrl: channelChatId.startsWith('@') ? `https://t.me/${channelChatId.slice(1)}/${message.id}` : undefined };
+  }
 
-      switch (action) {
-        case 'START_ONBOARDING': {
-          const channelId = targetId || 'ch-futurestack-001';
-          const session = await this.onboardingService.startOnboarding(channelId, String(senderId));
-          const firstMsg = session.messages[0]?.text || 'Welcome to onboarding!';
-          await this.sendMessage(senderId, firstMsg);
-          return { handled: true, responseText: 'Onboarding session started.' };
-        }
+  async sendMessage(chatId: string | number, text: string, inlineKeyboard?: TelegramInlineButton[][], photoUrl?: string): Promise<TelegramOutgoingMessage> {
+    const record: TelegramOutgoingMessage = { id: nextMessageId++, chatId, text, replyMarkup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined, sentAt: new Date().toISOString(), photoUrl };
+    simulatedMessages.push(record);
+    if (this.isConfigured() && !this.isDemoMode) {
+      try { await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: record.replyMarkup }) }); } catch (error) { console.warn('Telegram send failed:', error); }
+    }
+    return record;
+  }
 
-        case 'APPROVE_BRAIN': {
-          const channelId = targetId || 'ch-futurestack-001';
-          const brain = await this.onboardingService.approveBrain(channelId, String(senderId));
-          const msg =
-`✅ *CHANNEL BRAIN ACTIVATED!*
+  private async context(senderId: number): Promise<TenantContext | null> {
+    const resolved = await resolveTelegramTenantContext(senderId);
+    // The old global owner ID is strictly a DEMO_MODE migration fallback. The
+    // normal demo fixture still resolves through telegram_identities.
+    if (resolved) return resolved;
+    if (this.isDemoMode && senderId === this.demoOwnerUserId) return resolveTelegramTenantContext(senderId);
+    return null;
+  }
 
-Channel **${brain.identity.channelName}** is now ACTIVE!
-• Brain Version: v${brain.version}
-• Publishing: ${brain.publishing.postingFrequency} posts/day
-• Target Language: ${brain.media.mediaTextLanguage.toUpperCase()}
-• Owner Language: Persian
+  private async authorizeDraft(senderId: number, draftId: string, minimum: 'VIEWER' | 'APPROVER' = 'VIEWER') {
+    const context = await this.context(senderId);
+    if (!context) throw new Error('Unauthorized Telegram user');
+    const db = getDatabaseClient();
+    const draft = await db.query('SELECT * FROM content_drafts WHERE id = $1 AND workspace_id = $2', [draftId, context.workspaceId]);
+    if (!draft.rowCount) throw new Error('Draft not found in your workspace');
+    requireWorkspaceRole(context, minimum);
+    return { context, draft: draft.rows[0] };
+  }
 
-The autonomous research and publishing engine has started!`;
+  async handleUpdate(update: TelegramUpdate): Promise<{ handled: boolean; responseText: string }> {
+    const sender = update.callback_query?.from || update.message?.from;
+    if (!sender) return { handled: false, responseText: 'No message/callback' };
+    const senderId = sender.id;
+    const text = update.message?.text?.trim();
 
-          await this.sendMessage(senderId, msg);
-          return { handled: true, responseText: `Channel Brain for ${channelId} activated.` };
-        }
-
-        case 'VIEW_BRAIN': {
-          const channelId = targetId || 'ch-futurestack-001';
-          const brain = await this.brainService.getBrain(channelId);
-          if (!brain) {
-            await this.sendMessage(senderId, '🧠 Channel Brain not configured yet. Start onboarding via /onboard.');
-            return { handled: true, responseText: 'Brain not found' };
-          }
-          const text =
-`🧠 *CHANNEL BRAIN SUMMARY (v${brain.version})*
-
-*Niche:* ${brain.identity.niche}
-*Audience:* ${brain.audience.targetAudience}
-*Frequency:* ${brain.publishing.postingFrequency} posts/day
-*Primary Topics:* ${brain.content.primaryTopics.join(', ')}
-*Tone:* ${brain.style.tone}
-*Status:* ${brain.status}`;
-          await this.sendMessage(senderId, text);
-          return { handled: true, responseText: 'Brain displayed' };
-        }
-
-        case 'VIEW_LANGUAGE': {
-          const channelId = targetId || 'ch-futurestack-001';
-          const lang = await this.brainService.getLanguageSettings(channelId);
-          const text =
-`🌐 *CHANNEL LANGUAGE CONFIGURATION*
-• Content Language: ${lang.contentLanguage.toUpperCase()}
-• Owner Communication: ${lang.ownerCommunicationLanguage.toUpperCase()} (Persian)
-• Research Languages: ${lang.allowedSourceLanguages.map((l) => l.toUpperCase()).join(', ')}
-• Preserve Technical Terms: ${lang.preserveTechnicalTerms ? 'Yes' : 'No'}`;
-          await this.sendMessage(senderId, text);
-          return { handled: true, responseText: 'Language displayed' };
-        }
-
-        case 'APPROVE_DRAFT': {
-          const draftRes = await db.query('SELECT * FROM content_drafts WHERE id = $1', [targetId]);
-          if (draftRes.rowCount === 0) {
-            return { handled: true, responseText: 'Draft not found.' };
-          }
-          const draft = draftRes.rows[0];
-          await db.query(
-            "UPDATE content_drafts SET status = 'APPROVED', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-            [targetId]
-          );
-
-          await db.query(
-            `INSERT INTO audit_logs (id, workspace_id, channel_id, actor_type, actor_id, action, entity_type, entity_id, metadata)
-             VALUES ($1, $2, $3, 'OWNER', $4, 'DRAFT_APPROVED', 'DRAFT', $5, $6)`,
-            [`audit-${Date.now()}`, draft.workspace_id, draft.channel_id, String(senderId), targetId, JSON.stringify({ via: 'telegram_button' })]
-          );
-
-          const langSettings = await this.brainService.getLanguageSettings(draft.channel_id);
-          await this.sendPublishChoicePrompt(targetId, draft.suggested_publish_time || '20:30 UTC', langSettings.ownerCommunicationLanguage);
-          return { handled: true, responseText: `Draft ${targetId} approved.` };
-        }
-
-        case 'PUBLISH_NOW': {
-          const draftRes = await db.query('SELECT * FROM content_drafts WHERE id = $1', [targetId]);
-          if (draftRes.rowCount === 0) return { handled: true, responseText: 'Draft not found' };
-          const draft = draftRes.rows[0];
-
-          if (process.env.PAUSE_PUBLISHING === 'true') {
-            await this.sendMessage(this.ownerUserId, '⏸️ Cannot publish: Channel publishing is currently paused (PAUSE_PUBLISHING=true).');
-            return { handled: true, responseText: 'Publishing paused' };
-          }
-
-          const channelRes = await db.query('SELECT * FROM channels WHERE id = $1', [draft.channel_id]);
-          const channel = channelRes.rows[0];
-
-          const formattedDraft: ContentDraft = {
-            ...draft,
-            sources: typeof draft.sources === 'string' ? JSON.parse(draft.sources) : draft.sources,
-            whyItMatters: typeof draft.why_it_matters === 'string' ? JSON.parse(draft.why_it_matters) : draft.why_it_matters,
-            factCheckItems: typeof draft.fact_check_items === 'string' ? JSON.parse(draft.fact_check_items) : draft.fact_check_items,
-          };
-
-          const pub = await this.publishToChannel(channel.telegram_chat_id || '@futurestack_ai', formattedDraft, `idemp-pub-${targetId}`);
-
-          await db.query("UPDATE content_drafts SET status = 'PUBLISHED', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [targetId]);
-          await db.query(
-            `INSERT INTO published_posts (id, workspace_id, channel_id, draft_id, telegram_message_id, telegram_chat_id, published_text, telegram_message_url)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [`pub-${Date.now()}`, draft.workspace_id, draft.channel_id, targetId, pub.messageId, channel.telegram_chat_id || '@futurestack_ai', formatTelegramPost(formattedDraft), pub.messageUrl || null]
-          );
-
-          await db.query(
-            `INSERT INTO audit_logs (id, workspace_id, channel_id, actor_type, actor_id, action, entity_type, entity_id, metadata)
-             VALUES ($1, $2, $3, 'OWNER', $4, 'POST_PUBLISHED', 'DRAFT', $5, $6)`,
-            [`audit-${Date.now()}`, draft.workspace_id, draft.channel_id, String(senderId), targetId, JSON.stringify({ telegramMessageId: pub.messageId, messageUrl: pub.messageUrl })]
-          );
-
-          await this.sendMessage(this.ownerUserId, `🚀 *Post successfully published to ${channel.name}!* (Message ID: #${pub.messageId})`);
-          return { handled: true, responseText: 'Published now.' };
-        }
-
-        case 'KEEP_TIME': {
-          const draftRes = await db.query('SELECT * FROM content_drafts WHERE id = $1', [targetId]);
-          if (draftRes.rowCount === 0) return { handled: true, responseText: 'Draft not found' };
-          const draft = draftRes.rows[0];
-
-          const scheduledFor = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
-          await db.query("UPDATE content_drafts SET status = 'SCHEDULED', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [targetId]);
-          await db.query(
-            `INSERT INTO scheduled_posts (id, workspace_id, channel_id, draft_id, scheduled_for, status, idempotency_key)
-             VALUES ($1, $2, $3, $4, $5, 'PENDING', $6)
-             ON CONFLICT (idempotency_key) DO NOTHING`,
-            [`sched-${Date.now()}`, draft.workspace_id, draft.channel_id, targetId, scheduledFor, `idemp-${targetId}`]
-          );
-
-          await db.query(
-            `INSERT INTO audit_logs (id, workspace_id, channel_id, actor_type, actor_id, action, entity_type, entity_id, metadata)
-             VALUES ($1, $2, $3, 'OWNER', $4, 'POST_SCHEDULED', 'DRAFT', $5, $6)`,
-            [`audit-${Date.now()}`, draft.workspace_id, draft.channel_id, String(senderId), targetId, JSON.stringify({ scheduledFor })]
-          );
-
-          await this.sendMessage(this.ownerUserId, `⏰ *Post scheduled for ${draft.suggested_publish_time || '20:30 UTC'}*`);
-          return { handled: true, responseText: 'Scheduled at suggested time.' };
-        }
-
-        case 'REJECT_DRAFT': {
-          await db.query("UPDATE content_drafts SET status = 'REJECTED', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [targetId]);
-          await db.query(
-            `INSERT INTO audit_logs (id, workspace_id, channel_id, actor_type, actor_id, action, entity_type, entity_id, metadata)
-             VALUES ($1, $2, $3, 'OWNER', $4, 'DRAFT_REJECTED', 'DRAFT', $5, $6)`,
-            [`audit-${Date.now()}`, 'ws-demo-001', 'ch-futurestack-001', String(senderId), targetId, JSON.stringify({ via: 'telegram_button' })]
-          );
-
-          await this.sendMessage(this.ownerUserId, `❌ *Draft rejected.* It will not be published.`);
-          return { handled: true, responseText: 'Draft rejected.' };
-        }
-
-        case 'VIEW_SOURCES': {
-          const draftRes = await db.query('SELECT sources FROM content_drafts WHERE id = $1', [targetId]);
-          const sources = typeof draftRes.rows[0]?.sources === 'string' ? JSON.parse(draftRes.rows[0].sources) : draftRes.rows[0]?.sources || [];
-          const text = sources.map((s: any, idx: number) => `${idx + 1}. *${s.title}*\n${s.url}`).join('\n\n') || 'No sources recorded.';
-          await this.sendMessage(this.ownerUserId, `📚 *Sources for Draft ${targetId}:*\n\n${text}`);
-          return { handled: true, responseText: 'Sources displayed' };
-        }
-
-        case 'VIEW_EVIDENCE': {
-          const claimsRes = await db.query('SELECT * FROM claims WHERE draft_id = $1', [targetId]);
-          const claims: Claim[] = claimsRes.rows.map((r: any) => ({
-            id: r.id,
-            text: r.text,
-            normalizedText: r.normalized_text,
-            importance: r.importance,
-            confidence: r.confidence,
-            verificationStatus: r.verification_status,
-            sourceEvidenceIds: typeof r.source_evidence_ids === 'string' ? JSON.parse(r.source_evidence_ids) : r.source_evidence_ids || [],
-            conflictingEvidenceIds: typeof r.conflicting_evidence_ids === 'string' ? JSON.parse(r.conflicting_evidence_ids) : r.conflicting_evidence_ids || [],
-          }));
-
-          let evText = `🔎 *Evidence & Fact-Check Details for Draft ${targetId}:*\n\n`;
-          if (claims.length === 0) {
-            evText += 'All factual claims verified against primary technical source specifications.';
-          } else {
-            claims.forEach((cl, i) => {
-              evText += `*Claim ${i + 1}:* ${cl.text}\n*Status:* \`${cl.verificationStatus}\` (Confidence: ${(cl.confidence * 100).toFixed(0)}%)\n\n`;
-            });
-          }
-
-          await this.sendMessage(this.ownerUserId, evText);
-          return { handled: true, responseText: 'Evidence displayed' };
-        }
-
-        case 'EDIT_DRAFT': {
-          await this.sendMessage(this.ownerUserId, `✏️ *What would you like to change in Draft ${targetId}?*\n\nReply with your instruction, e.g.:\n- "Make it shorter"\n- "Make it more technical"\n- "Change headline to: ..."`);
-          return { handled: true, responseText: 'Awaiting edit instructions' };
-        }
-
-        default:
-          return { handled: false, responseText: `Unknown action: ${action}` };
+    // Deep-link linking intentionally works before a Telegram identity exists.
+    if (text?.startsWith('/start link_')) {
+      try {
+        const token = text.slice('/start link_'.length).trim();
+        const link = await new AccountLinkingService().consumeLinkChallenge({ token, telegramUserId: senderId, username: sender.username });
+        await this.sendMessage(senderId, '✅ Telegram account linked securely. Use /workspaces to select a workspace.');
+        return { handled: true, responseText: `Account linked${link.workspaceId ? ' and workspace selected' : ''}` };
+      } catch (error) {
+        await this.sendMessage(senderId, '⚠️ This link is invalid, expired, or already used.');
+        return { handled: true, responseText: `Link failed: ${error instanceof Error ? error.message : 'invalid token'}` };
       }
     }
 
-    // 2. Handle Text Messages / Commands
-    if (update.message && update.message.text) {
-      const msg = update.message;
-      const text = (msg.text || '').trim();
-      const senderId = msg.from.id;
-
-      if (!this.isAuthorizedOwner(senderId)) {
-        await this.sendMessage(senderId, '⚠️ Unauthorized: Access restricted to authorized channel owner.');
-        return { handled: true, responseText: 'Unauthorized' };
-      }
-
-      // Check if active onboarding session exists for current channel
-      const targetChannelId = 'ch-futurestack-001';
-      const activeSession = await this.onboardingService.getActiveSession(targetChannelId);
-
-      // Onboarding explicit trigger
-      if (text.startsWith('/onboard')) {
-        const session = await this.onboardingService.startOnboarding(targetChannelId, String(senderId));
-        await this.sendMessage(senderId, session.messages[0].text);
-        return { handled: true, responseText: 'Onboarding started' };
-      }
-
-      // If active onboarding session is awaiting input and user didn't type a slash command:
-      if (activeSession && activeSession.status === 'IN_PROGRESS' && !text.startsWith('/')) {
-        const result = await this.onboardingService.processUserMessage(targetChannelId, String(senderId), text);
-        const buttons = result.isReadyForApproval
-          ? [
-              [
-                { text: '✅ Approve Channel Brain', callback_data: `APPROVE_BRAIN:${targetChannelId}` },
-                { text: '✏️ Edit', callback_data: `EDIT_BRAIN:${targetChannelId}` },
-              ],
-            ]
-          : undefined;
-
-        await this.sendMessage(senderId, result.replyText, buttons);
-        return { handled: true, responseText: 'Onboarding response processed' };
-      }
-
-      // Standard Command Router (Section 90)
-      if (text.startsWith('/start') || text.startsWith('/help')) {
-        const welcome =
-`🤖 *AI Channel Manager — Command Center*
-
-Available commands:
-/status - Channel and system health status
-/drafts - View pending drafts awaiting approval
-/today - Today's intelligence briefing & metrics
-/schedule - View upcoming scheduled broadcasts
-/sources - Monitored content sources and health
-/channels - Connected channels & permissions
-/brain - View current Channel Brain DNA
-/onboard - Run conversational AI onboarding
-/pause - Pause all scheduled publishing
-/resume - Resume scheduled publishing
-
-Or type natural commands:
-- "Find me today's best AI news"
-- "Pause publishing"
-- "Show me what is scheduled tonight"`;
-
-        const buttons: TelegramInlineButton[][] = [
-          [
-            { text: '🚀 Start Onboarding', callback_data: `START_ONBOARDING:${targetChannelId}` },
-            { text: '🧠 View Channel Brain', callback_data: `VIEW_BRAIN:${targetChannelId}` },
-          ],
-        ];
-
-        await this.sendMessage(senderId, welcome, buttons);
-        return { handled: true, responseText: 'Welcome displayed' };
-      }
-
-      if (text.startsWith('/today')) {
-        const publishedToday = await db.query(
-          "SELECT count(*) as cnt FROM published_posts WHERE channel_id = $1 AND published_at >= CURRENT_DATE",
-          [targetChannelId]
-        );
-        const pendingToday = await db.query(
-          "SELECT count(*) as cnt FROM content_drafts WHERE channel_id = $1 AND status = 'PENDING_APPROVAL'",
-          [targetChannelId]
-        );
-        const todayMsg =
-`📅 *TODAY'S CHANNEL INTELLIGENCE*
-• Published Today: ${publishedToday.rows[0]?.cnt || 0} posts
-• Drafts Pending Approval: ${pendingToday.rows[0]?.cnt || 0}
-• Daily Quota Target: 3 posts
-• Status: Autonomous monitoring active`;
-        await this.sendMessage(senderId, todayMsg);
-        return { handled: true, responseText: 'Today stats sent' };
-      }
-
-      if (text.startsWith('/schedule')) {
-        const scheduled = await db.query(
-          "SELECT sp.*, cd.headline FROM scheduled_posts sp JOIN content_drafts cd ON sp.draft_id = cd.id WHERE sp.channel_id = $1 AND sp.status = 'PENDING' ORDER BY sp.scheduled_for ASC",
-          [targetChannelId]
-        );
-        if (scheduled.rowCount === 0) {
-          await this.sendMessage(senderId, '🗓️ *No posts currently scheduled.* Send /drafts to review pending items.');
-          return { handled: true, responseText: 'Schedule empty' };
-        }
-        let schedText = '🗓️ *UPCOMING SCHEDULED BROADCASTS:*\n\n';
-        scheduled.rows.forEach((s: any, idx: number) => {
-          schedText += `${idx + 1}. *${s.headline}*\n• Time: ${new Date(s.scheduled_for).toUTCString()}\n\n`;
-        });
-        await this.sendMessage(senderId, schedText);
-        return { handled: true, responseText: 'Schedule sent' };
-      }
-
-      if (text.startsWith('/sources')) {
-        const sources = await db.query('SELECT name, type, trust_score, health_status FROM content_sources WHERE channel_id = $1', [targetChannelId]);
-        let srcText = '📡 *MONITORED CONTENT SOURCES:*\n\n';
-        sources.rows.forEach((s: any, idx: number) => {
-          const hIcon = s.health_status === 'HEALTHY' ? '🟢' : s.health_status === 'DEGRADED' ? '🟡' : '🔴';
-          srcText += `${idx + 1}. ${hIcon} *${s.name}* (${s.type})\n• Trust: ${s.trust_score}% | Status: ${s.health_status || 'HEALTHY'}\n\n`;
-        });
-        await this.sendMessage(senderId, srcText);
-        return { handled: true, responseText: 'Sources sent' };
-      }
-
-      if (text.startsWith('/channels')) {
-        const channels = await db.query('SELECT * FROM channels');
-        let chText = '📢 *CONNECTED CHANNELS:*\n\n';
-        channels.rows.forEach((c: any, idx: number) => {
-          chText += `${idx + 1}. *${c.name}* (${c.telegram_chat_id || '@unassigned'})\n• Status: \`${c.status}\` | Language: ${c.language.toUpperCase()}\n\n`;
-        });
-        await this.sendMessage(senderId, chText);
-        return { handled: true, responseText: 'Channels sent' };
-      }
-
-      if (text.startsWith('/brain')) {
-        const brain = await this.brainService.getBrain(targetChannelId);
-        if (!brain) {
-          await this.sendMessage(senderId, '🧠 No Channel Brain configured yet. Run /onboard to start setup.');
-          return { handled: true, responseText: 'Brain not configured' };
-        }
-        const bText =
-`🧠 *CHANNEL BRAIN OVERVIEW (v${brain.version})*
-• Status: ${brain.status}
-• Niche: ${brain.identity.niche}
-• Target Audience: ${brain.audience.targetAudience}
-• Frequency: ${brain.publishing.postingFrequency} posts/day
-• Style: ${brain.style.tone}`;
-        await this.sendMessage(senderId, bText);
-        return { handled: true, responseText: 'Brain info sent' };
-      }
-
-      if (text.startsWith('/status') || text.startsWith('/health')) {
-        const channels = await db.query('SELECT count(*) as cnt FROM channels WHERE status = \'ACTIVE\'');
-        const pending = await db.query("SELECT count(*) as cnt FROM content_drafts WHERE status = 'PENDING_APPROVAL'");
-        const scheduled = await db.query("SELECT count(*) as cnt FROM scheduled_posts WHERE status = 'PENDING'");
-        const statusText =
-`📊 *SYSTEM & CHANNEL HEALTH*
-• Active Channels: ${channels.rows[0]?.cnt || 1}
-• Pending Approvals: ${pending.rows[0]?.cnt || 0}
-• Scheduled Posts: ${scheduled.rows[0]?.cnt || 0}
-• Publishing: ${process.env.PAUSE_PUBLISHING === 'true' ? '⏸️ PAUSED' : '▶️ ACTIVE'}
-• Telegram Bot: ${this.isConfigured() ? '🟢 CONNECTED (Live API)' : '🧪 SIMULATED (Demo Mode)'}
-• AI Grounding: 🟢 Active (Resilient Gemini / OpenAI Failover)
-• Mode: ${process.env.DEMO_MODE === 'true' ? '🧪 DEMO MODE' : '🚀 PRODUCTION'}`;
-        await this.sendMessage(senderId, statusText);
-        return { handled: true, responseText: 'Status sent' };
-      }
-
-      if (text.startsWith('/drafts')) {
-        const drafts = await db.query("SELECT * FROM content_drafts WHERE status = 'PENDING_APPROVAL' LIMIT 5");
-        if (drafts.rowCount === 0) {
-          await this.sendMessage(senderId, '✨ No drafts currently pending approval.');
-          return { handled: true, responseText: 'No pending drafts' };
-        }
-
-        const lang = await this.brainService.getLanguageSettings(targetChannelId);
-        for (const row of drafts.rows) {
-          const formatted: ContentDraft = {
-            ...row,
-            sources: typeof row.sources === 'string' ? JSON.parse(row.sources) : row.sources,
-            whyItMatters: typeof row.why_it_matters === 'string' ? JSON.parse(row.why_it_matters) : row.why_it_matters,
-            factCheckItems: typeof row.fact_check_items === 'string' ? JSON.parse(row.fact_check_items) : row.fact_check_items,
-          };
-          await this.sendDraftForApproval(formatted, lang.ownerCommunicationLanguage);
-        }
-        return { handled: true, responseText: 'Drafts sent' };
-      }
-
-      if (text.startsWith('/pause') || text.toLowerCase().includes('pause publishing')) {
-        process.env.PAUSE_PUBLISHING = 'true';
-        await this.sendMessage(senderId, '⏸️ *Publishing paused.* Autonomous research will continue, but no post will be published.');
-        return { handled: true, responseText: 'Publishing paused' };
-      }
-
-      if (text.startsWith('/resume') || text.toLowerCase().includes('resume publishing')) {
-        process.env.PAUSE_PUBLISHING = 'false';
-        await this.sendMessage(senderId, '▶️ *Publishing resumed.* Scheduled posts will proceed.');
-        return { handled: true, responseText: 'Publishing resumed' };
-      }
-
-      // Natural language commands & editorial feedback (Section 40 & 90)
-      if (text.toLowerCase().includes('find') || text.toLowerCase().includes('news') || text.toLowerCase().includes('research')) {
-        await this.sendMessage(
-          senderId,
-          `🔎 *Triggering on-demand research cycle for:* "${text}"\n\nChannel Brain context loaded. Querying primary sources and research papers.`
-        );
-        return { handled: true, responseText: 'Manual research triggered' };
-      }
-
-      // Natural language edit fallback (Section 40)
-      await this.sendMessage(
-        senderId,
-        `💡 Received editorial instruction: "${text}". Applying stylistic revisions to pending drafts.`
-      );
-      return { handled: true, responseText: 'Instruction processed' };
+    const context = await this.context(senderId);
+    if (!context) {
+      await this.sendMessage(senderId, '⚠️ Unauthorized: link your Telegram account through the secure website deep link first.');
+      return { handled: true, responseText: 'Unauthorized Telegram user' };
     }
 
-    return { handled: false, responseText: 'No message/callback' };
+    try {
+      if (update.callback_query) return this.handleCallback(senderId, update.callback_query.data, context);
+      if (text) return this.handleCommand(senderId, text, context);
+      return { handled: false, responseText: 'No message/callback' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Request failed';
+      await this.sendMessage(senderId, `⚠️ ${message}`);
+      return { handled: true, responseText: message.includes('Unauthorized') ? 'Unauthorized Telegram user' : message };
+    }
+  }
+
+  private async handleCallback(senderId: number, data: string, context: TenantContext): Promise<{ handled: boolean; responseText: string }> {
+    const [action, targetId] = data.split(':', 2);
+    const db = getDatabaseClient();
+    if (['APPROVE_DRAFT', 'REJECT_DRAFT', 'PUBLISH_NOW', 'KEEP_TIME', 'EDIT_DRAFT', 'CHANGE_TIME', 'VIEW_SOURCES', 'VIEW_EVIDENCE'].includes(action)) {
+      const minimum = ['APPROVE_DRAFT', 'REJECT_DRAFT', 'PUBLISH_NOW', 'KEEP_TIME', 'EDIT_DRAFT', 'CHANGE_TIME'].includes(action) ? 'APPROVER' : 'VIEWER';
+      const access = await this.authorizeDraft(senderId, targetId, minimum as 'VIEWER' | 'APPROVER');
+      const draft = access.draft;
+      if (action === 'APPROVE_DRAFT') {
+        await db.query("UPDATE content_drafts SET status = 'APPROVED', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND workspace_id = $2", [targetId, access.context.workspaceId]);
+        await AuditService.log(access.context.workspaceId, draft.channel_id, 'OWNER' as any, String(senderId), 'DRAFT_APPROVED', 'DRAFT', targetId, { via: 'telegram_button' });
+        await new EditorialPlanningService().recordLearning({ workspaceId: access.context.workspaceId, channelId: draft.channel_id, draftId: targetId, action: 'APPROVE', signalKey: 'approved_topic', signalValue: draft.topic, confidence: 0.8 });
+        const lang = await this.brain.getLanguageSettings(draft.channel_id);
+        await this.sendPublishChoicePrompt(targetId, draft.suggested_publish_time || '20:30 UTC', lang.ownerCommunicationLanguage, String(senderId));
+        return { handled: true, responseText: `Draft ${targetId} approved.` };
+      }
+      if (action === 'REJECT_DRAFT') {
+        await db.query("UPDATE content_drafts SET status = 'REJECTED', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND workspace_id = $2", [targetId, access.context.workspaceId]);
+        await AuditService.log(access.context.workspaceId, draft.channel_id, 'OWNER' as any, String(senderId), 'DRAFT_REJECTED', 'DRAFT', targetId, { via: 'telegram_button' });
+        await new EditorialPlanningService().recordLearning({ workspaceId: access.context.workspaceId, channelId: draft.channel_id, draftId: targetId, action: 'REJECT', signalKey: 'rejected_topic', signalValue: draft.topic, confidence: 0.9 });
+        await this.sendMessage(senderId, '❌ Draft rejected. It will not be published.'); return { handled: true, responseText: 'Draft rejected.' };
+      }
+      if (action === 'PUBLISH_NOW') {
+        const result = await new PublishingService().publishDraft(targetId, { actorType: 'OWNER' as any, actorId: String(senderId), idempotencyKey: `telegram-publish:${targetId}` });
+        if (!result.success) return { handled: true, responseText: result.error || 'Publish blocked' };
+        await this.sendMessage(senderId, `🚀 Post successfully published (message #${result.telegramMessageId}).`); return { handled: true, responseText: 'Published now.' };
+      }
+      if (action === 'KEEP_TIME') {
+        const schedule = await new SchedulerService().scheduleDraft(targetId, new Date(Date.now() + 2 * 3600 * 1000), String(senderId));
+        await new EditorialPlanningService().recordLearning({ workspaceId: access.context.workspaceId, channelId: draft.channel_id, draftId: targetId, action: 'TIME_CHANGE', signalKey: 'schedule_choice', signalValue: 'keep_suggested_time', confidence: 0.7 });
+        return { handled: true, responseText: `Scheduled ${schedule}` };
+      }
+      if (action === 'EDIT_DRAFT' || action === 'CHANGE_TIME') { await this.sendMessage(senderId, `✏️ Send an instruction for draft ${targetId}; your edit will be re-proposed for approval.`); return { handled: true, responseText: 'Awaiting edit instructions' }; }
+      if (action === 'VIEW_SOURCES') {
+        const sources = typeof draft.sources === 'string' ? JSON.parse(draft.sources) : draft.sources || [];
+        await this.sendMessage(senderId, `📚 Sources for Draft ${targetId}:\n\n${sources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.url}`).join('\n\n') || 'No sources recorded.'}`);
+        return { handled: true, responseText: 'Sources displayed' };
+      }
+      const claims = await db.query('SELECT * FROM claims WHERE draft_id = $1 AND channel_id = $2', [targetId, draft.channel_id]);
+      const message = claims.rows.length ? claims.rows.map((c: Claim, i: number) => `${i + 1}. ${c.text} — ${c.verificationStatus}`).join('\n') : 'All factual claims are linked to stored evidence.';
+      await this.sendMessage(senderId, `🔎 Evidence for Draft ${targetId}:\n\n${message}`); return { handled: true, responseText: 'Evidence displayed' };
+    }
+    if (['START_ONBOARDING', 'APPROVE_BRAIN', 'VIEW_BRAIN', 'VIEW_LANGUAGE'].includes(action)) {
+      await requireChannelAccess(context, targetId, action === 'APPROVE_BRAIN' ? 'APPROVER' : 'VIEWER');
+      if (action === 'START_ONBOARDING') { const session = await this.onboarding.startOnboarding(targetId, String(senderId)); await this.sendMessage(senderId, session.messages[0]?.text || 'Onboarding started'); return { handled: true, responseText: 'Onboarding session started.' }; }
+      if (action === 'APPROVE_BRAIN') { await this.onboarding.approveBrain(targetId, String(senderId)); return { handled: true, responseText: 'Channel Brain activated.' }; }
+      if (action === 'VIEW_BRAIN') { const brain = await this.brain.getBrain(targetId); await this.sendMessage(senderId, brain ? `🧠 ${brain.identity.channelName}\n${brain.identity.niche}` : 'No Channel Brain configured.'); return { handled: true, responseText: 'Brain displayed' }; }
+      const lang = await this.brain.getLanguageSettings(targetId); await this.sendMessage(senderId, `🌐 Content: ${lang.contentLanguage}; owner communication: ${lang.ownerCommunicationLanguage}`); return { handled: true, responseText: 'Language displayed' };
+    }
+    return { handled: false, responseText: `Unknown action: ${action}` };
+  }
+
+  private async handleCommand(senderId: number, text: string, context: TenantContext): Promise<{ handled: boolean; responseText: string }> {
+    const db = getDatabaseClient();
+    if (text.startsWith('/account')) { await this.sendMessage(senderId, `Account: ${context.accountId}\nWorkspace: ${context.workspaceId}\nRole: ${context.role}`); return { handled: true, responseText: 'Account displayed' }; }
+    if (text.startsWith('/workspaces')) {
+      const rows = await db.query('SELECT w.id, w.name FROM workspaces w JOIN workspace_members wm ON wm.workspace_id = w.id WHERE wm.account_id = $1 AND wm.status = $2 ORDER BY w.name', [context.accountId, 'ACTIVE']);
+      await this.sendMessage(senderId, `Workspaces:\n${rows.rows.map((w: any) => `• ${w.name} — /workspace ${w.id}`).join('\n')}`); return { handled: true, responseText: 'Workspaces displayed' };
+    }
+    if (text.startsWith('/workspace ')) { const selected = await selectTelegramWorkspace(senderId, text.slice(11).trim()); await AuditService.log(selected.workspaceId, undefined, 'OWNER' as any, String(senderId), 'WORKSPACE_SELECTED', 'WORKSPACE', selected.workspaceId); await this.sendMessage(senderId, '✅ Workspace selected.'); return { handled: true, responseText: 'Workspace selected' }; }
+    if (text.startsWith('/channels')) {
+      const channels = await db.query('SELECT id, name, status, telegram_chat_id FROM channels WHERE workspace_id = $1 ORDER BY name', [context.workspaceId]);
+      await this.sendMessage(senderId, `Channels:\n${channels.rows.map((c: any) => `• ${c.name} (${c.status}) — /use ${c.id}`).join('\n') || 'No channels linked.'}`); return { handled: true, responseText: 'Channels displayed' };
+    }
+    if (text.startsWith('/use ')) { await selectTelegramChannel(senderId, text.slice(5).trim()); await this.sendMessage(senderId, '✅ Active channel selected.'); return { handled: true, responseText: 'Channel selected' }; }
+    const channelId = context.activeChannelId;
+    if (!channelId) { await this.sendMessage(senderId, 'Select a channel first with /channels then /use <channel-id>.'); return { handled: true, responseText: 'No active channel' }; }
+    await requireChannelAccess(context, channelId);
+    if (text.startsWith('/start') || text.startsWith('/help')) { await this.sendMessage(senderId, '🤖 AI Channel Manager\n/account /workspaces /workspace <id> /channels /use <id>\n/drafts /today /schedule /brain /onboard'); return { handled: true, responseText: 'Welcome displayed' }; }
+    if (text.startsWith('/onboard')) { const session = await this.onboarding.startOnboarding(channelId, String(senderId)); await this.sendMessage(senderId, session.messages[0]?.text || 'Onboarding started'); return { handled: true, responseText: 'Onboarding started' }; }
+    if (text.startsWith('/drafts')) {
+      const drafts = await db.query("SELECT * FROM content_drafts WHERE workspace_id = $1 AND channel_id = $2 AND status = 'PENDING_APPROVAL' LIMIT 5", [context.workspaceId, channelId]);
+      const lang = await this.brain.getLanguageSettings(channelId);
+      for (const row of drafts.rows) await this.sendDraftForApproval({ ...row, workspaceId: row.workspace_id, channelId: row.channel_id, whyItMatters: typeof row.why_it_matters === 'string' ? JSON.parse(row.why_it_matters) : row.why_it_matters, sources: typeof row.sources === 'string' ? JSON.parse(row.sources) : row.sources, factCheckItems: typeof row.fact_check_items === 'string' ? JSON.parse(row.fact_check_items) : row.fact_check_items }, lang.ownerCommunicationLanguage);
+      return { handled: true, responseText: drafts.rowCount ? 'Drafts sent' : 'No pending drafts' };
+    }
+    if (text.startsWith('/today')) { const published = await db.query("SELECT count(*) AS count FROM published_posts WHERE channel_id = $1 AND published_at >= CURRENT_DATE", [channelId]); const pending = await db.query("SELECT count(*) AS count FROM content_drafts WHERE channel_id = $1 AND status = 'PENDING_APPROVAL'", [channelId]); await this.sendMessage(senderId, `📅 Today\nPublished: ${published.rows[0]?.count || 0}\nPending approval: ${pending.rows[0]?.count || 0}`); return { handled: true, responseText: 'Today stats sent' }; }
+    if (text.startsWith('/schedule')) { const scheduled = await db.query("SELECT scheduled_for, id FROM scheduled_posts WHERE channel_id = $1 AND status = 'PENDING' ORDER BY scheduled_for", [channelId]); await this.sendMessage(senderId, scheduled.rows.length ? scheduled.rows.map((s: any) => `• ${s.id}: ${new Date(s.scheduled_for).toUTCString()}`).join('\n') : 'No posts currently scheduled.'); return { handled: true, responseText: 'Schedule sent' }; }
+    if (text.startsWith('/brain')) { const brain = await this.brain.getBrain(channelId); await this.sendMessage(senderId, brain ? `🧠 ${brain.identity.channelName}\nTopics: ${brain.content.primaryTopics.join(', ')}` : 'No Channel Brain configured.'); return { handled: true, responseText: 'Brain displayed' }; }
+    if (text.startsWith('/pause') || text.toLowerCase().includes('pause publishing')) { requireWorkspaceRole(context, 'APPROVER'); process.env.PAUSE_PUBLISHING = 'true'; await this.sendMessage(senderId, '⏸️ Publishing paused.'); return { handled: true, responseText: 'Publishing paused' }; }
+    if (text.startsWith('/resume') || text.toLowerCase().includes('resume publishing')) { requireWorkspaceRole(context, 'APPROVER'); process.env.PAUSE_PUBLISHING = 'false'; await this.sendMessage(senderId, '▶️ Publishing resumed.'); return { handled: true, responseText: 'Publishing resumed' }; }
+    await this.sendMessage(senderId, `💡 Editorial instruction recorded for active channel: "${text}"`); return { handled: true, responseText: 'Instruction processed' };
   }
 }
 
 let botInstance: TelegramBotService | null = null;
-
-export function getTelegramBotService(): TelegramBotService {
-  if (!botInstance) {
-    botInstance = new TelegramBotService();
-  }
-  return botInstance;
-}
+export function getTelegramBotService(): TelegramBotService { if (!botInstance) botInstance = new TelegramBotService(); return botInstance; }

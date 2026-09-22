@@ -25,7 +25,7 @@ export default function Topbar() {
       const res = await fetch('/api/research/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelId: 'ch-futurestack-001', autoDraft: true }),
+        body: JSON.stringify({ autoDraft: true }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -57,7 +57,7 @@ export default function Topbar() {
         <div className="flex items-center space-x-2">
           <span className="text-xs text-slate-400">Active Channel:</span>
           <span className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200">
-            FutureStack AI (@futurestack_ai)
+            Active workspace channel
           </span>
         </div>
 

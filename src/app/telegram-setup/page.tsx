@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Send, CheckCircle2, AlertCircle, ShieldAlert, Key, MessageSquare, Terminal } from 'lucide-react';
 
 export default function TelegramSetupPage() {
-  const [channelChatId, setChannelChatId] = useState('@futurestack_ai');
+  const [channelChatId, setChannelChatId] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<any>(null);
   const [testSending, setTestSending] = useState(false);
@@ -61,7 +61,7 @@ export default function TelegramSetupPage() {
           <span>Telegram Channel Connection Wizard</span>
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Configure bot credentials, verify channel administrator privileges, test publishing permissions, and validate numeric owner identity.
+          Verify channel administrator privileges, test posting permissions, and link Telegram users to their account/workspace context.
         </p>
       </div>
 
@@ -93,8 +93,8 @@ export default function TelegramSetupPage() {
           <div className="flex items-start space-x-3">
             <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">3</span>
             <div>
-              <p className="font-semibold text-white">Configure Owner Telegram User ID</p>
-              <p className="text-slate-400">Set TELEGRAM_OWNER_USER_ID to your numeric Telegram user ID (obtained via @userinfobot). Private messages and inline approvals will only be sent to this ID.</p>
+              <p className="font-semibold text-white">Link Telegram account securely</p>
+              <p className="text-slate-400">Generate an account-link challenge from the website integration, open its Telegram deep link, then choose an active workspace/channel. Numeric Telegram IDs are verified; usernames are only display snapshots.</p>
             </div>
           </div>
         </div>

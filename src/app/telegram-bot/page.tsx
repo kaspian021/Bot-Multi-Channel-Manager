@@ -6,7 +6,8 @@ import { Bot, Send, User, CheckCircle2, ShieldAlert, Sparkles, RefreshCw, Trash2
 export default function TelegramBotPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
-  const [userId, setUserId] = useState('987654321'); // Default authorized owner ID
+  const [userId, setUserId] = useState('');
+  const [linkedUserId, setLinkedUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -15,6 +16,10 @@ export default function TelegramBotPage() {
       .then((res) => res.json())
       .then((data) => {
         setMessages(data.messages || []);
+        if (data.linkedTelegramUserId) {
+          setLinkedUserId(String(data.linkedTelegramUserId));
+          setUserId((current) => current || String(data.linkedTelegramUserId));
+        }
       })
       .catch((err) => console.error(err));
   };
@@ -76,7 +81,7 @@ export default function TelegramBotPage() {
     fetchMessages();
   };
 
-  const isOwner = userId === '987654321';
+  const isOwner = Boolean(linkedUserId) && userId === linkedUserId;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -117,20 +122,20 @@ export default function TelegramBotPage() {
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Only user ID {process.env.TELEGRAM_OWNER_USER_ID || '987654321'} is authorized to approve or publish.
+              Authorization is resolved from the linked Telegram identity and active workspace membership.
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-2 self-end sm:self-auto">
           <button
-            onClick={() => setUserId('987654321')}
+            onClick={() => setUserId(linkedUserId)}
             className={`px-3 py-1 text-xs rounded font-medium ${isOwner ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}
           >
             Act as Owner
           </button>
           <button
-            onClick={() => setUserId('111222333')}
+            onClick={() => setUserId(linkedUserId ? `${linkedUserId}9` : '999999999')}
             className={`px-3 py-1 text-xs rounded font-medium ${!isOwner ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'}`}
           >
             Act as Impostor

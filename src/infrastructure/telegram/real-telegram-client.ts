@@ -49,7 +49,7 @@ export class RealTelegramClient implements ITelegramPublisher, ITelegramOwnerMes
         isValid: true,
         title: 'FutureStack AI (Channel Verified)',
         channelTitle: 'FutureStack AI (Channel Verified)',
-        username: typeof channelChatId === 'string' && channelChatId.startsWith('@') ? channelChatId : '@futurestack_ai',
+        username: typeof channelChatId === 'string' && channelChatId.startsWith('@') ? channelChatId : undefined,
         isAdministrator: true,
         canPostMessages: true,
         canEditMessages: true,

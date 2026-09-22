@@ -74,8 +74,9 @@ export class BrandService {
     await db.query("UPDATE channel_brand_proposals SET status = 'APPLIED' WHERE id = $1", [proposalId]);
 
     const chanRes = await db.query('SELECT workspace_id FROM channels WHERE id = $1', [p.channel_id]);
+    if (!chanRes.rowCount) throw new Error('Channel no longer exists');
     await AuditService.log(
-      chanRes.rows[0]?.workspace_id || 'ws-demo-001',
+      chanRes.rows[0].workspace_id,
       p.channel_id,
       AuditActorType.OWNER,
       ownerUserId,

@@ -21,7 +21,7 @@ import {
 
 export default function ChannelBrainPage() {
   const [activeTab, setActiveTab] = useState<'brain' | 'language' | 'preferences' | 'recommendations' | 'versions'>('brain');
-  const [channelId, setChannelId] = useState('demo-channel-1');
+  const [channelId, setChannelId] = useState('');
   const [brain, setBrain] = useState<any>(null);
   const [languageSettings, setLanguageSettings] = useState<any>(null);
   const [preferences, setPreferences] = useState<any[]>([]);

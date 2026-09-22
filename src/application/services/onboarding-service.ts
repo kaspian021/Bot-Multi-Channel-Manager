@@ -26,7 +26,9 @@ export class OnboardingService {
     await db.query("UPDATE channels SET status = 'ONBOARDING', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [channelId]);
 
     const chanRes = await db.query('SELECT * FROM channels WHERE id = $1', [channelId]);
-    const channelName = chanRes.rows[0]?.name || 'your channel';
+    if (!chanRes.rowCount) throw new Error('Channel not found');
+    const channel = chanRes.rows[0];
+    const channelName = channel.name || 'your channel';
 
     const sessionId = `onb-${channelId}-${Date.now()}`;
     const initialMessage: OnboardingMessage = {
@@ -65,7 +67,7 @@ export class OnboardingService {
     );
 
     await AuditService.log(
-      'ws-demo-001',
+      channel.workspace_id,
       channelId,
       AuditActorType.OWNER,
       ownerUserId,
@@ -275,6 +277,8 @@ Buttons:
 
     // 4. Activate Channel! (AC-11)
     const db = getDatabaseClient();
+    const channel = await db.query<{ workspace_id: string }>('SELECT workspace_id FROM channels WHERE id = $1', [channelId]);
+    if (!channel.rowCount) throw new Error('Channel not found');
     await db.query("UPDATE channels SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [channelId]);
 
     // Complete session
@@ -283,7 +287,7 @@ Buttons:
     }
 
     await AuditService.log(
-      'ws-demo-001',
+      channel.rows[0].workspace_id,
       channelId,
       AuditActorType.OWNER,
       ownerUserId,

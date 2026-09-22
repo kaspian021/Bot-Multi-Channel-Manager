@@ -12,6 +12,7 @@ import { AuditService } from './audit-service';
 import { AuditActorType, ContentCandidate, ContentType } from '../../domain/types';
 import { RawResearchCandidate } from '../interfaces/ai-providers';
 import { ChannelBrainService } from './channel-brain-service';
+import { EntitlementGuard } from './entitlement-service';
 
 export class ResearchService {
   private rss = new RssFeedConnector();
@@ -19,6 +20,7 @@ export class ResearchService {
   private youtube = new YouTubeConnector();
   private reddit = new RedditConnector();
   private brainService = new ChannelBrainService();
+  private entitlementGuard = new EntitlementGuard();
 
   async executeResearchRun(channelId: string): Promise<{ runId: string; candidatesFound: number; candidates: ContentCandidate[] }> {
     const db = getDatabaseClient();
@@ -30,6 +32,17 @@ export class ResearchService {
       throw new Error(`Channel ${channelId} not found`);
     }
     const channel = channelRes.rows[0];
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [channel.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; research is fail-closed');
+    await this.entitlementGuard.assert({
+      accountId,
+      workspaceId: channel.workspace_id,
+      channelId,
+      operation: 'RESEARCH',
+      source: 'research-service',
+      idempotencyKey: `research:${channelId}:${Date.now()}`,
+    });
 
     const brain = await this.brainService.getBrain(channelId);
     const langSettings = await this.brainService.getLanguageSettings(channelId);

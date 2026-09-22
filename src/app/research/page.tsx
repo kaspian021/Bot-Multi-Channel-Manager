@@ -31,7 +31,7 @@ export default function ResearchPage() {
       const res = await fetch('/api/research/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelId: 'ch-futurestack-001', autoDraft: true }),
+        body: JSON.stringify({ autoDraft: true }),
       });
       const data = await res.json();
       if (res.ok) {

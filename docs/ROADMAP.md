@@ -34,14 +34,14 @@ This roadmap details the progressive evolution from the current MVP to an enterp
 - Sponsored content policy checker with owner approval gate.
 - Sponsor post expiration and performance reporting.
 
-## Phase 4: Advanced Editorial AI & Multi-Agent Consensus
-- Multi-agent debate: AI Critic vs. AI Writer before owner submission.
-- Real-time fact-checking against Wikidata and arXiv semantic search.
-- Adaptive posting schedule learning based on follower engagement curves.
-- Automated A/B headline performance testing.
+## Phase 4: Multi-Tenant Autonomous Editorial & Entitlement Operations (Completed)
+- External account identity, workspace memberships, secure Telegram deep-link account binding, and workspace/channel selection.
+- Generic product, plan, subscription, entitlement, usage-event, outbox, and signed integration webhook contracts.
+- Central entitlement enforcement, atomic daily metering, generation safety floor, and publish-time expiry checks.
+- Daily editorial plans, explainable stored-data trend signals, persisted owner-learning signals, and owner-approved strategy recommendations.
+- Fair multi-channel orchestration with per-channel runtime locking and separate research/generation cadence.
 
-## Phase 5: Multi-Tenant SaaS Commercialization (Section 56)
-- Workspace billing tiers: Starter, Pro, Agency.
-- Organization SSO (SAML / OAuth2).
-- Usage metering for AI tokens and source polling frequency.
-- White-label custom Telegram bot tokens per tenant.
+## Future: Commercial source-of-truth connection
+- Connect a DigiStore-compatible account/billing website through the existing `/api/integrations/v1` contract.
+- Payment methods, invoices, tax, checkout, and recurring payment processing remain intentionally outside this repository.
+- Future SSO/SAML and enterprise billing UI remain future work.

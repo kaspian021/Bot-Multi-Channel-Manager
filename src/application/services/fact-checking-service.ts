@@ -3,6 +3,7 @@
 // Maintains Claim ↔ Evidence graph, cross-source conflict detection
 // ==============================================================
 
+import crypto from 'crypto';
 import { Claim, EvidenceItem, ClaimVerificationStatus } from '../../domain/types';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 
@@ -51,7 +52,7 @@ export class FactCheckingService {
     for (let idx = 0; idx < sentences.length; idx++) {
       const sentence = sentences[idx];
       claims.push({
-        id: `claim-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
+        id: `claim-${crypto.randomUUID()}`,
         draftId,
         channelId,
         candidateId,
@@ -68,7 +69,7 @@ export class FactCheckingService {
 
     if (claims.length === 0) {
       claims.push({
-        id: `claim-${Date.now()}-0`,
+        id: `claim-${crypto.randomUUID()}`,
         draftId,
         channelId,
         candidateId,

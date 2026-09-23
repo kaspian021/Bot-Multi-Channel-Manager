@@ -1,0 +1,4 @@
+-- ==============================================================
+-- Phase 4 schema is kept in the primary schema.sql; this file is a
+-- documentation marker for operators upgrading from Phases 1-3.
+-- ==============================================================

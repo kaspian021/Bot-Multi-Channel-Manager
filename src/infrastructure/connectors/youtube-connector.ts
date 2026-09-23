@@ -69,22 +69,15 @@ export class YouTubeConnector implements ISocialSourceProvider {
       }
     }
 
-    // High-Fidelity Demo / Simulation Mode
-    return [
-      {
-        title: `Deep-dive architectural review: ${query}`,
-        url: `https://www.youtube.com/watch?v=demo-${Math.random().toString(36).substring(7)}`,
-        sourceName: 'YouTube: Andrej Karpathy Engineering Sessions',
-        publishedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-        summary: `Comprehensive code-level walkthrough of ${query} covering CUDA memory access patterns and kernel execution latency.`,
-        claims: [
-          `Detailed benchmark walkthrough for ${query}`,
-          'Includes reproducible PyTorch implementation in repository',
-        ],
-        relevanceScore: 85,
-        noveltyScore: 82,
-        technicalDepthScore: 90,
-      },
-    ];
+    if (process.env.DEMO_MODE !== 'true') return [];
+    // Explicit demo/simulation fixture only.
+    return [{
+      title: `Demo: architectural review of ${query}`,
+      url: 'https://www.youtube.com/watch?v=demo-fixture',
+      sourceName: 'Demo YouTube Fixture',
+      publishedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+      summary: `Demo-only walkthrough of ${query}.`,
+      claims: [`Demo fixture for ${query}`], relevanceScore: 85, noveltyScore: 82, technicalDepthScore: 90,
+    }];
   }
 }

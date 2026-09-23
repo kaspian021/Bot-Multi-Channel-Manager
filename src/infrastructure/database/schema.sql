@@ -467,3 +467,266 @@ CREATE INDEX IF NOT EXISTS idx_claims_draft ON claims(draft_id);
 CREATE INDEX IF NOT EXISTS idx_story_clusters_channel ON story_clusters(channel_id);
 CREATE INDEX IF NOT EXISTS idx_provider_logs_run ON research_provider_logs(run_id);
 CREATE INDEX IF NOT EXISTS idx_temporary_directives_channel ON temporary_directives(channel_id, expires_at);
+
+-- ==============================================================
+-- Phase 4: Account Identity, Entitlements, Integration & Editorial Ops
+-- All additions are intentionally idempotent for PostgreSQL and PGlite.
+-- ==============================================================
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    external_provider TEXT NOT NULL,
+    external_user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    display_name TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_accounts_external_identity UNIQUE (external_provider, external_user_id)
+);
+
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS account_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_workspaces_account ON workspaces(account_id);
+
+CREATE TABLE IF NOT EXISTS telegram_identities (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    telegram_user_id TEXT NOT NULL UNIQUE,
+    telegram_username_snapshot TEXT,
+    verified_at TIMESTAMP WITH TIME ZONE,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS workspace_members (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'VIEWER',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (workspace_id, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS telegram_user_context (
+    telegram_user_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    active_workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    active_channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS account_link_tokens (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    telegram_user_id TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS account_link_attempts (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT,
+    telegram_user_id TEXT,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    outcome TEXT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    product_key TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS plans (
+    product_key TEXT NOT NULL REFERENCES products(product_key) ON DELETE CASCADE,
+    plan_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    feature_defaults TEXT NOT NULL DEFAULT '{}',
+    limit_defaults TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_key, plan_code)
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    product_key TEXT NOT NULL REFERENCES products(product_key) ON DELETE RESTRICT,
+    plan_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    current_period_start TIMESTAMP WITH TIME ZONE,
+    current_period_end TIMESTAMP WITH TIME ZONE,
+    cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+    effective_at TIMESTAMP WITH TIME ZONE,
+    provider_subscription_id TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_subscriptions_provider UNIQUE (provider_subscription_id)
+);
+
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS pending_plan_code TEXT;
+
+CREATE TABLE IF NOT EXISTS entitlement_snapshots (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    product_key TEXT NOT NULL REFERENCES products(product_key) ON DELETE RESTRICT,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    plan_code TEXT NOT NULL,
+    valid_until TIMESTAMP WITH TIME ZONE,
+    features_json TEXT NOT NULL DEFAULT '{}',
+    limits_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'MOCK',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_entitlement_version UNIQUE (account_id, product_key, version)
+);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+    product_key TEXT NOT NULL REFERENCES products(product_key) ON DELETE RESTRICT,
+    metric TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS usage_daily_counters (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    product_key TEXT NOT NULL REFERENCES products(product_key) ON DELETE CASCADE,
+    metric TEXT NOT NULL,
+    period_start DATE NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, workspace_id, channel_id, product_key, metric, period_start)
+);
+
+CREATE TABLE IF NOT EXISTS integration_outbox (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    idempotency_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS integration_webhook_events (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT uq_integration_webhook_event UNIQUE (provider, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS editorial_plans (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    plan_date DATE NOT NULL,
+    target_posts INTEGER NOT NULL,
+    content_mix_targets TEXT NOT NULL DEFAULT '{}',
+    selected_topics TEXT NOT NULL DEFAULT '[]',
+    preferred_windows TEXT NOT NULL DEFAULT '[]',
+    planned_candidate_ids TEXT NOT NULL DEFAULT '[]',
+    rationale_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'DRAFT',
+    generated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_editorial_plan_channel_day UNIQUE (channel_id, plan_date)
+);
+
+CREATE TABLE IF NOT EXISTS editorial_learning_events (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    draft_id TEXT REFERENCES content_drafts(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    signal_key TEXT NOT NULL,
+    signal_value TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    provenance TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS channel_performance_daily (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    metric_date DATE NOT NULL,
+    views INTEGER,
+    engagement INTEGER,
+    forward_count INTEGER,
+    reaction_count INTEGER,
+    source TEXT NOT NULL,
+    available BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (channel_id, metric_date)
+);
+
+CREATE TABLE IF NOT EXISTS editorial_runtime_state (
+    channel_id TEXT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+    last_researched_at TIMESTAMP WITH TIME ZONE,
+    last_generated_at TIMESTAMP WITH TIME ZONE,
+    generation_lock_key TEXT,
+    generation_lock_until TIMESTAMP WITH TIME ZONE,
+    last_plan_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_members_account ON workspace_members(account_id, workspace_id);
+CREATE INDEX IF NOT EXISTS idx_telegram_identity_account ON telegram_identities(account_id);
+CREATE INDEX IF NOT EXISTS idx_link_tokens_expiry ON account_link_tokens(expires_at, status);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_account_product ON subscriptions(account_id, product_key, updated_at);
+CREATE INDEX IF NOT EXISTS idx_entitlements_active ON entitlement_snapshots(account_id, product_key, is_active, version);
+CREATE INDEX IF NOT EXISTS idx_usage_events_account_metric ON usage_events(account_id, product_key, metric, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_pending ON integration_outbox(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_editorial_learning_channel ON editorial_learning_events(channel_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_editorial_plans_channel_day ON editorial_plans(channel_id, plan_date);
+
+-- Generation slots are claimed atomically before AI work starts. The operation
+-- value is audit/diagnostic data; the conditional timestamp update is the lock.
+ALTER TABLE editorial_runtime_state ADD COLUMN IF NOT EXISTS generation_operation_id TEXT;
+
+-- Hardening: secure machine-call replay prevention, recommendation dedupe,
+-- and Telegram channel ownership are database-enforced invariants.
+CREATE TABLE IF NOT EXISTS integration_request_nonces (
+    integration_key TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (integration_key, request_id)
+);
+
+ALTER TABLE strategy_recommendations ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_recommendations_pending_fingerprint
+    ON strategy_recommendations(channel_id, fingerprint) WHERE status = 'PENDING' AND fingerprint IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_telegram_chat_unique
+    ON channels(telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;

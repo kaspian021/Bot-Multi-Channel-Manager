@@ -1,16 +1,5 @@
-// ==============================================================
-// Research Runs API
-// ==============================================================
-
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDatabaseClient } from '@/infrastructure/database/db-client';
-import { seedDatabase } from '@/infrastructure/database/seed';
-
+import { apiError, tenantFor } from '@/app/api/api-helpers';
 export const dynamic = 'force-dynamic';
-
-export async function GET() {
-  await seedDatabase(false);
-  const db = getDatabaseClient();
-  const res = await db.query('SELECT * FROM research_runs ORDER BY created_at DESC LIMIT 50');
-  return NextResponse.json(res.rows);
-}
+export async function GET(req: NextRequest) { try { const ctx=await tenantFor(req); return NextResponse.json((await getDatabaseClient().query('SELECT * FROM research_runs WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 50',[ctx.workspaceId])).rows); }catch(e){return apiError(e);} }

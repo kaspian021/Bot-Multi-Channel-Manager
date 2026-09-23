@@ -17,6 +17,7 @@ DEMO_MODE=false
 
 # Telegram Credentials
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
+# DEMO_MODE-only legacy simulator fallback; production uses account linking
 TELEGRAM_OWNER_USER_ID=987654321
 TELEGRAM_MODE=webhook # or polling
 APP_PUBLIC_URL=https://your-domain.com
@@ -68,12 +69,12 @@ Use the web wizard at `/telegram-setup` or API route `/api/telegram/verify`:
 2. The wizard validates:
    - Bot administrator status via `getChatAdministrators`
    - `can_post_messages` and `can_edit_messages` permissions
-   - Numeric Telegram user ID authorization (`TELEGRAM_OWNER_USER_ID`)
+   - Linked numeric Telegram identity + workspace membership authorization
 3. Send a safe test message to confirm live formatting and link generation.
 
 ## 7. Testing via Embedded Simulator & Production Mode
 
 - **Demo Mode (`DEMO_MODE=true`)**: Works out of the box with zero external API credentials.
-- **Production Mode (`DEMO_MODE=false`)**: Requires valid `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_USER_ID`. Uses database-backed publishing locks (`publishing_locks`) with idempotency keys to guarantee at-most-once broadcast delivery.
+- **Production Mode (`DEMO_MODE=false`)**: Requires a valid `TELEGRAM_BOT_TOKEN` plus linked account/workspace Telegram identities. It uses database-backed publishing locks (`publishing_locks`) with idempotency keys to guarantee at-most-once broadcast delivery.
 - Navigate to `/telegram-bot` in the web panel to test conversational flows and inline approvals.
 

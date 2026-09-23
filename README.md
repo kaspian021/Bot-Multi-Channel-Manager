@@ -1,13 +1,12 @@
 # AI Multi-Channel Telegram Manager
 
-[![Tests](https://img.shields.io/badge/Tests-101%20Passed-emerald.svg)]()
-[![Acceptance](https://img.shields.io/badge/Acceptance%20Tests-75%2F75%20Passed-blue.svg)]()
-[![Phase 3](https://img.shields.io/badge/Phase%203-Research%20Intelligence%20%2B%20Production%20Telegram-teal.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-Run%20npm%20test-emerald.svg)]()
+[![Phase 4](https://img.shields.io/badge/Phase%204-Multi--tenant%20%2B%20Entitlements-teal.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Multi--Tenant-purple.svg)]()
 [![Demo Mode](https://img.shields.io/badge/Demo%20Mode-Ready-green.svg)]()
 
-> **Production-Ready AI Multi-Channel Telegram Manager — Phases 1, 2 & 3**
-> An autonomous, channel-aware, multilingual research intelligence and Telegram publishing engine equipped with Google Gemini search grounding, OpenAI fallback, SSRF-safe ingestion, Claim ↔ Evidence graph verification, story clustering, Channel Brain DNA, and production Telegram Bot integration.
+> **Production-Ready AI Multi-Channel Telegram Manager — Phases 1–4**
+> A multi-tenant, account-linked, subscription-aware autonomous editorial system with provider-agnostic commercial integration, entitlement enforcement, usage metering, and secure Telegram operations. No payment gateway is implemented here.
 
 ---
 
@@ -21,7 +20,7 @@
 * **Source Trust & Health State Machine**: 4-tier source model (Tier 1 Official Labs to Tier 4 Aggregators) with consecutive failure tracking (`HEALTHY` -> `DEGRADED` -> `FAILING` -> `DISABLED`).
 * **Novelty Detection & Story Clustering**: Distinguishes `EXACT_DUPLICATE` from `SAME_STORY_NEW_INFORMATION` with entity-aware clustering and breaking news classification (`BREAKING`, `RECENT`, `CURRENT`, `EVERGREEN`).
 * **First-Class Evidence & Claim Graph**: Deconstructs candidate drafts into atomic factual assertions, cross-verifying them against primary evidence items and flagging contradictions.
-* **Production Telegram Bot Engine**: Live Bot API adapter validating administrator privileges (`can_post_messages`), numeric owner authorization, database-backed idempotency publishing locks, safe test connection messaging, and inline action buttons (`[✅ APPROVE]`, `[✏️ EDIT]`, `[❌ REJECT]`, `[⏰ CHANGE TIME]`, `[🔎 EVIDENCE]`, `[📚 SOURCES]`).
+* **Production Telegram Bot Engine**: Live Bot API adapter validates administrator privileges (`can_post_messages`), resolves linked numeric Telegram identity + workspace membership for every callback, uses database-backed idempotency publishing locks, and provides safe inline approval actions.
 * **Channel Brain (Channel DNA)**: Persistent 10-section channel profile (identity, audience, content strategy, style, sources, publishing, media, approval, business, restrictions).
 * **Conversational AI Onboarding**: Interactive Telegram/web interview with smart questioning that extracts channel attributes and requires human approval before channel activation.
 * **Multilingual Intelligence**: Discovers sources across multiple languages (German, Japanese, English) and synthesizes them into target channel language with technical term protection (CUDA, Transformer, PyTorch).
@@ -121,6 +120,47 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ---
 
+## Phase 4: Multi-Tenant Commercial & Editorial Operations
+
+### Account and Telegram identity
+
+The application does not own passwords. A future website creates an external `Account` identity (`externalProvider` + `externalUserId`), workspaces, and memberships. Telegram users are linked through a random, opaque `link_<token>` deep link. Only a SHA-256 token digest is stored; challenges expire after `ACCOUNT_LINK_TOKEN_TTL_SECONDS`, can be consumed once, and never contain account data. Numeric Telegram IDs—not usernames—are the identity key.
+
+Every customer-owned route resolves a `TenantContext` and validates workspace membership before loading a channel or draft. In production the application rejects unsigned `x-account-id` / external-identity headers: a trusted product-to-product caller must prove them with the signed integration contract below. Browser/human authentication remains the future website's responsibility and is deliberately not impersonated by an integration key. `DEMO_MODE=true` resolves only the explicit demo fixture. The legacy `TELEGRAM_OWNER_USER_ID` is a demo simulator fallback, never a production authorization authority.
+
+### Entitlements, usage, and scheduled expiry
+
+`Product`, `Plan`, `Subscription`, and immutable versioned entitlement snapshots are generic (`PRODUCT_KEY=ai-channel-manager` by default). Application services use `EntitlementGuard`; UI and Telegram checks cannot bypass it. It enforces feature flags, current channel limits, usage quotas, and the per-channel generation gate:
+
+```text
+effectiveGenerationInterval = max(plan generationIntervalSeconds, PLATFORM_MIN_GENERATION_INTERVAL_SECONDS)
+```
+
+Research interval and content-generation interval remain separate. Usage events (`AI_REQUEST`, `CONTENT_GENERATION`, `RESEARCH_RUN`, `POST_PUBLISHED`, `CHANNEL_CREATED`) use idempotency keys and daily counters. A due scheduled post is checked again immediately before publication. If access has expired it becomes `BLOCKED_ENTITLEMENT`; reactivation does not publish an old backlog.
+
+### Integration contract (future DigiStore-compatible)
+
+The versioned adapter contract lives below `/api/integrations/v1`:
+
+- `GET /entitlements/{externalUserId}?provider=…`
+- `POST /usage`
+- `POST /link/verify`
+- `POST /webhooks/subscription`
+
+All integration endpoints are machine-to-machine only and require `X-Integration-Key`, `X-Integration-Timestamp`, `X-Integration-Signature`, and `X-Integration-Request-Id`. The signature is `HMAC-SHA256(timestamp + '.' + method + '.' + path + '.' + rawBody)` using `INTEGRATION_REQUEST_SECRET`; comparison is constant-time, timestamps have a five-minute window, and request IDs are durably replay-protected. These keys authenticate a service, **not a human browser**. Configure `INTEGRATION_AUTH_KEY` and `INTEGRATION_REQUEST_SECRET` before production use. Subscription event IDs provide a second, durable business-idempotency layer. `MockEntitlementProvider` works offline today; `RemoteEntitlementProvider` is selected only with `ENTITLEMENT_PROVIDER=remote`.
+
+### Demo verification
+
+```bash
+DEMO_MODE=true npm run seed
+npm run verify:phase4-demo
+npm test
+npm run test:acceptance
+npm run build
+```
+
+The explicit demo fixture includes one account, one linked Telegram identity, one workspace, two channels, a subscription/entitlement, and sample usage. It supports research → plan → draft → approval → schedule → publish, then entitlement expiry blocking.
+
 ## 5. Docker Compose Deployment
 
 Run the complete multi-container stack (Web, Worker, PostgreSQL, Redis) via Docker Compose:
@@ -151,8 +191,8 @@ To transition from DEMO_MODE to a live Telegram Bot and Channel:
    ```bash
    DEMO_MODE=false
    TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
-   TELEGRAM_OWNER_USER_ID=987654321
    TELEGRAM_MODE=webhook # or polling
+   # Link each owner with the secure account deep-link flow; no global owner ID.
    APP_PUBLIC_URL=https://your-public-domain.com
    WEBHOOK_SECRET=your_random_secret
    ```
@@ -199,7 +239,7 @@ If the primary provider hits a rate limit or network timeout, the application au
 | `DATABASE_CONNECTION_STRING` | *(empty)* | External PostgreSQL connection string. When empty, embedded PGlite is used |
 | `REDIS_CONNECTION_STRING` | *(empty)* | Optional Redis URI for distributed lock caching |
 | `TELEGRAM_BOT_TOKEN` | *(demo token)* | Telegram Bot API token |
-| `TELEGRAM_OWNER_USER_ID` | `987654321` | Numeric ID of authorized channel owner |
+| `TELEGRAM_OWNER_USER_ID` | `987654321` | DEMO_MODE-only simulator fallback; production uses linked Telegram identities |
 | `TELEGRAM_MODE` | `polling` | `polling` or `webhook` |
 | `PAUSE_PUBLISHING` | `false` | Emergency kill-switch: halts Telegram publishing while research continues |
 | `RESEARCH_INTERVAL_HOURS` | `3` | Background research frequency |

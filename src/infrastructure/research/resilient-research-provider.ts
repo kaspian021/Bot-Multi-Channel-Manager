@@ -3,6 +3,7 @@
 // Integrates Gemini Search Grounding + OpenAI Search with Audit Logs
 // ==============================================================
 
+import crypto from 'crypto';
 import { IResearchProvider, IWebSearchProvider } from '../../application/interfaces/production-interfaces';
 import { GeminiSearchGroundingProvider } from './gemini-search-grounding-provider';
 import { OpenAiWebSearchProvider } from './openai-web-search-provider';
@@ -107,7 +108,7 @@ export class ResilientResearchProvider implements IResearchProvider {
           `INSERT INTO provider_failure_logs (id, provider, action, error_message, fallback_provider)
            VALUES ($1, $2, 'research_topic', $3, $4)`,
           [
-            `fail-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            `fail-${crypto.randomUUID()}`,
             (this.primary as any).providerName || (this.primary as any).name || 'PRIMARY',
             errorMessage,
             (this.fallback as any).providerName || (this.fallback as any).name || 'FALLBACK',
@@ -133,15 +134,14 @@ export class ResilientResearchProvider implements IResearchProvider {
         errorMessage = fallbackErr?.message || 'Fallback provider error';
         await this.logProviderExecution(options.runId, options.channelId, (this.fallback as any).providerName || (this.fallback as any).name, false, errorCategory, errorMessage);
 
-        // Safe graceful fallback in demo mode
-        rawResults = [
-          {
-            title: `Engineering Overview: ${query}`,
-            url: `https://futurestack.ai/research/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`,
-            snippet: `Autonomous intelligence synthesis for ${query} covering technical architecture and performance benchmarks.`,
-            publishedDate: new Date().toISOString(),
-          },
-        ];
+        // Synthetic research is permitted only for the explicit demo path.
+        // Production fails closed with no manufactured evidence or candidates.
+        rawResults = process.env.DEMO_MODE === 'true' ? [{
+          title: `Demo: engineering overview of ${query}`,
+          url: 'https://example.invalid/demo/research-fallback',
+          snippet: `Demo-only research fixture for ${query}.`,
+          publishedDate: new Date().toISOString(),
+        }] : [];
       }
     }
 
@@ -149,8 +149,8 @@ export class ResilientResearchProvider implements IResearchProvider {
     await this.logProviderExecution(options.runId, options.channelId, selectedProviderName, success, errorCategory, errorMessage, durationMs);
 
     // 3. Normalize into first-class Evidence Items (Section 16)
-    const normalizedEvidence: EvidenceItem[] = rawResults.map((r, idx) => ({
-      id: `ev-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
+    const normalizedEvidence: EvidenceItem[] = rawResults.map((r) => ({
+      id: `ev-${crypto.randomUUID()}`,
       sourceUrl: r.url,
       sourceTitle: r.title,
       quotedPassage: r.snippet || r.title,
@@ -185,7 +185,7 @@ export class ResilientResearchProvider implements IResearchProvider {
   ): Promise<void> {
     try {
       const db = getDatabaseClient();
-      const id = `rpl-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const id = `rpl-${crypto.randomUUID()}`;
       await db.query(
         `INSERT INTO research_provider_logs (
           id, run_id, channel_id, provider, request_type, duration_ms, success,

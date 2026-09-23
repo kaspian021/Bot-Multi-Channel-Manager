@@ -1,45 +1,6 @@
-// ==============================================================
-// Evidence & Claims API (Section 17, 34, 77)
-// ==============================================================
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabaseClient } from '@/infrastructure/database/db-client';
-
+import { apiError, tenantFor } from '@/app/api/api-helpers';
+import { requireDraftAccess } from '@/application/services/tenant-context-service';
 export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest) {
-  try {
-    const db = getDatabaseClient();
-    const url = new URL(req.url);
-    const draftId = url.searchParams.get('draftId');
-
-    let claimsQuery = 'SELECT * FROM claims';
-    let claimsParams: any[] = [];
-
-    if (draftId) {
-      claimsQuery += ' WHERE draft_id = $1';
-      claimsParams.push(draftId);
-    }
-
-    claimsQuery += ' ORDER BY created_at DESC LIMIT 50';
-
-    let claimsRes = await db.query(claimsQuery, claimsParams);
-
-    if (claimsRes.rowCount === 0 && !draftId) {
-      const { seedDatabase } = await import('@/infrastructure/database/seed');
-      await seedDatabase(false);
-      claimsRes = await db.query(claimsQuery, claimsParams);
-    }
-
-    const evidenceQuery = 'SELECT * FROM evidence_items ORDER BY created_at DESC LIMIT 50';
-    const evidenceRes = await db.query(evidenceQuery);
-
-    return NextResponse.json({
-      success: true,
-      claims: claimsRes.rows,
-      evidenceItems: evidenceRes.rows,
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to fetch evidence' }, { status: 500 });
-  }
-}
+export async function GET(req: NextRequest) { try { const ctx=await tenantFor(req); const draftId=req.nextUrl.searchParams.get('draftId'); if(draftId) await requireDraftAccess(ctx,draftId); const db=getDatabaseClient(); const claims=draftId ? await db.query(`SELECT cl.* FROM claims cl JOIN content_drafts d ON d.id=cl.draft_id WHERE cl.draft_id=$1 AND d.workspace_id=$2 ORDER BY cl.created_at DESC LIMIT 50`,[draftId,ctx.workspaceId]) : await db.query(`SELECT cl.* FROM claims cl JOIN content_drafts d ON d.id=cl.draft_id WHERE d.workspace_id=$1 ORDER BY cl.created_at DESC LIMIT 50`,[ctx.workspaceId]); const evidence=await db.query(`SELECT ei.* FROM evidence_items ei JOIN channels c ON c.id=ei.channel_id WHERE c.workspace_id=$1 ORDER BY ei.created_at DESC LIMIT 50`,[ctx.workspaceId]); return NextResponse.json({success:true,claims:claims.rows,evidenceItems:evidence.rows}); }catch(e){return apiError(e,'Failed to fetch evidence');} }

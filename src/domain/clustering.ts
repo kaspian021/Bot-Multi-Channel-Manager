@@ -102,7 +102,7 @@ export function clusterStoryCandidates(
   arg1: string | ContentCandidate[],
   arg2?: ContentCandidate[]
 ): ClusterOutput[] & { clusters?: StoryCluster[]; dedupedCandidates?: ContentCandidate[] } {
-  let channelId = 'ch-futurestack-001';
+  let channelId = '';
   let candidates: ContentCandidate[] = [];
 
   if (typeof arg1 === 'string') {

@@ -2,6 +2,7 @@
 // Channel Brain Service — Section 3, 9, 10, 18 Specification
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import {
   ChannelBrain,
@@ -38,7 +39,7 @@ export class ChannelBrainService {
     const existing = await this.getBrain(channelId);
 
     const version = existing ? existing.version + 1 : 1;
-    const brainId = existing ? existing.id : `brain-${channelId}-${Date.now()}`;
+    const brainId = existing ? existing.id : `brain-${channelId}-${crypto.randomUUID()}`;
     const status = brainData.status || (existing ? existing.status : 'ACTIVE');
 
     const identity = brainData.identity || existing?.identity || {
@@ -199,7 +200,7 @@ export class ChannelBrainService {
     );
 
     // Persist version snapshot
-    const versionId = `cbv-${channelId}-v${version}-${Date.now()}`;
+    const versionId = `cbv-${channelId}-v${version}-${crypto.randomUUID()}`;
     await db.query(
       `INSERT INTO channel_brain_versions (
         id, channel_id, brain_id, version, snapshot_json, changed_fields, changed_by, reason
@@ -254,8 +255,10 @@ export class ChannelBrainService {
       ]
     );
 
+    const auditChannel = await db.query<{ workspace_id: string }>('SELECT workspace_id FROM channels WHERE id = $1', [channelId]);
+    if (!auditChannel.rowCount) throw new Error('Channel not found for Channel Brain audit');
     await AuditService.log(
-      'ws-demo-001',
+      auditChannel.rows[0].workspace_id,
       channelId,
       changedBy === 'owner' ? AuditActorType.OWNER : AuditActorType.AI_WORKER,
       changedBy,
@@ -488,7 +491,7 @@ export class ChannelBrainService {
     pref: Omit<OwnerPreference, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<OwnerPreference> {
     const db = getDatabaseClient();
-    const id = `pref-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const id = `pref-${crypto.randomUUID()}`;
 
     await db.query(
       `INSERT INTO owner_preferences (

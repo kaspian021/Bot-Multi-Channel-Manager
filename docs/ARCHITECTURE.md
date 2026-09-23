@@ -91,9 +91,15 @@ Content follows a validated deterministic state progression:
 [ARCHIVED]
 ```
 
+## Phase 4: Multi-Tenant Account & Commercial Integration Seam
+
+Phase 4 introduces `Account`, `TelegramIdentity`, `WorkspaceMember`, persistent Telegram context, generic product/plan/subscription/entitlement snapshots, idempotent usage/outbox records, and a plan-aware editorial worker. The external website is the authentication and commercial authority; this application resolves its external identity to membership before any customer-owned query. `EntitlementGuard` is an application-layer boundary, so APIs, Telegram, and workers share the same quota and expiry decisions.
+
+The detailed model, webhook protocol, scheduling behavior, and demo contract are in [PHASE4.md](./PHASE4.md).
+
 ## 5. Security & Isolation
 
-- **Telegram Numeric User ID Verification**: The system authenticates owners exclusively via their numeric Telegram user ID (`TELEGRAM_OWNER_USER_ID`), rejecting forged usernames.
+- **Telegram Numeric User ID Verification**: Numeric Telegram IDs are linked to accounts and workspace roles through one-time deep-link challenges. `TELEGRAM_OWNER_USER_ID` is demo-only compatibility fallback, never production authority.
 - **SSRF Protection**: All URLs retrieved by connectors must pass protocol validation (HTTP/HTTPS only) and are blocked if pointing to `localhost`, loopbacks, RFC 1918 private subnets, or cloud metadata endpoints (`169.254.169.254`).
 - **Emergency Pause Mode**: Setting `PAUSE_PUBLISHING=true` instantly freezes all outgoing broadcasts without interrupting autonomous background research.
 

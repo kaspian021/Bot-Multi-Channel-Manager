@@ -1,18 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BrandService } from '@/application/services/brand-service';
-
-export const dynamic = 'force-dynamic';
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const channelId = body.channelId || 'ch-futurestack-001';
-
-    const brandService = new BrandService();
-    const proposal = await brandService.createBrandingProposal(channelId);
-
-    return NextResponse.json(proposal);
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Brand proposal failed' }, { status: 500 });
-  }
-}
+import { apiError, tenantFor } from '@/app/api/api-helpers';
+import { requireChannelAccess, requireWorkspaceRole } from '@/application/services/tenant-context-service';
+export const dynamic='force-dynamic';
+export async function POST(req:NextRequest){try{const ctx=await tenantFor(req);requireWorkspaceRole(ctx,'EDITOR');const body=await req.json().catch(()=>({}));const channelId=body.channelId || ctx.activeChannelId;if(!channelId)return NextResponse.json({error:'channelId is required'},{status:400});await requireChannelAccess(ctx,channelId,'EDITOR');return NextResponse.json(await new BrandService().createBrandingProposal(channelId));}catch(e){return apiError(e,'Brand proposal failed');}}

@@ -20,10 +20,12 @@ import {
   Settings,
   ShieldCheck,
   CheckCircle,
+  BadgeCheck,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Account & Plan', href: '/account', icon: BadgeCheck },
   { name: 'Channels', href: '/channels', icon: Radio },
   { name: 'Channel Brain', href: '/brain', icon: Sparkles },
   { name: 'Research & Runs', href: '/research', icon: Sparkles },
@@ -95,8 +97,8 @@ export default function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500">
-        <p>FutureStack AI Channel</p>
-        <p className="text-slate-600 mt-0.5">Multi-Tenant Engine v1.0.0</p>
+        <p>Workspace-aware operations</p>
+        <p className="text-slate-600 mt-0.5">Multi-Tenant Engine v4.0.0</p>
       </div>
     </aside>
   );

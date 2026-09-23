@@ -2,6 +2,7 @@
 // Draft Generation & Editorial Service — Channel Brain Aware
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { getAiProvider } from '../../infrastructure/ai/ai-provider-factory';
 import { getTelegramBotService } from '../../infrastructure/telegram/telegram-bot-service';
@@ -9,6 +10,8 @@ import { evaluateQualityGate } from '../../domain/quality-gate';
 import { validateTransition } from '../../domain/state-machine';
 import { AuditService } from './audit-service';
 import { ChannelBrainService } from './channel-brain-service';
+import { EntitlementGuard } from './entitlement-service';
+import { EditorialPlanningService } from './editorial-planning-service';
 import {
   AuditActorType,
   ContentDraft,
@@ -19,6 +22,8 @@ import {
 
 export class DraftService {
   private brainService = new ChannelBrainService();
+  private entitlementGuard = new EntitlementGuard();
+  private editorialPlanning = new EditorialPlanningService();
 
   /**
    * Generates a new ContentDraft using Channel Brain context and language settings.
@@ -38,6 +43,22 @@ export class DraftService {
     // 2. Fetch Channel, Channel Brain, and Language Settings
     const chanRes = await db.query('SELECT * FROM channels WHERE id = $1', [cand.channel_id]);
     const channel = chanRes.rows[0];
+    if (!channel) throw new Error('Candidate channel no longer exists');
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [channel.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; generation is fail-closed');
+    const generationOperationKey = `draft-generation:${candidateId}:${crypto.randomUUID()}`;
+    // Slot acquisition happens before metering and before any external AI work.
+    // It is database-atomic, so manual/API/Telegram/worker entrypoints that
+    // use DraftService share the same channel interval protection.
+    await this.entitlementGuard.tryAcquireGenerationSlot({
+      accountId, workspaceId: channel.workspace_id, channelId: channel.id,
+      operationId: generationOperationKey, source: 'draft-service',
+    });
+    await this.entitlementGuard.assert({
+      accountId, workspaceId: channel.workspace_id, channelId: channel.id,
+      operation: 'GENERATE', source: 'draft-service', idempotencyKey: generationOperationKey,
+    });
 
     const brain = await this.brainService.getBrain(cand.channel_id);
     const langSettings = await this.brainService.getLanguageSettings(cand.channel_id);
@@ -63,28 +84,26 @@ export class DraftService {
     const tone = brain?.style.tone || 'expert, concise, modern, credible';
     const audience = brain?.audience.targetAudience || 'Software engineers and technical founders';
 
-    const structuredOutput = await ai.generateStructuredDraft(
-      cand.title,
-      {
-        title: cand.title,
-        url: cand.canonical_url,
-        sourceName: cand.author || channel.name,
-        publishedAt: cand.published_at,
-        summary: cand.summary,
-        claims,
-        relevanceScore: 90,
-        noveltyScore: 88,
-        technicalDepthScore: 92,
-      },
-      contentLanguage
-    );
+    let structuredOutput: Awaited<ReturnType<typeof ai.generateStructuredDraft>>;
+    try {
+      structuredOutput = await ai.generateStructuredDraft(
+        cand.title,
+        { title: cand.title, url: cand.canonical_url, sourceName: cand.author || channel.name, publishedAt: cand.published_at, summary: cand.summary, claims, relevanceScore: 90, noveltyScore: 88, technicalDepthScore: 92 },
+        contentLanguage
+      );
+      await this.entitlementGuard.markAttemptOutcome('GENERATE', generationOperationKey, 'SUCCESSFUL');
+    } catch (error) {
+      await this.entitlementGuard.markAttemptOutcome('GENERATE', generationOperationKey, 'FAILED', error instanceof Error ? error.message : 'AI request failed');
+      throw error;
+    }
 
-    // If source was foreign (e.g., German source), ensure English headline and translation synthesis
     let headline = structuredOutput.headline;
     let explanation = structuredOutput.explanation || structuredOutput.body;
-    if (cand.title.includes('Max-Planck-Institut') || cand.title.includes('Quanten-Algorithmus')) {
-      headline = 'Max Planck Institute researchers achieve 2.8x speedup in transformer inference via quantum-inspired tensor compression';
-      explanation = 'Researchers at the Max Planck Institute have open-sourced a quantum-inspired tensor compression library that accelerates matrix multiplication kernels by 2.8x on standard GPU clusters while maintaining numerical precision.';
+    // Deterministic translation wording is retained only for the explicit demo
+    // fixture; production uses provider output grounded in the stored source.
+    if (process.env.DEMO_MODE === 'true' && (cand.title.includes('Max-Planck-Institut') || cand.title.includes('Quanten-Algorithmus'))) {
+      headline = 'Demo: quantum-inspired tensor compression for transformer inference';
+      explanation = 'Demo fixture translation for the stored multilingual candidate.';
     }
 
     // 5. AI Quality Gate (Section 15 & 32)
@@ -99,7 +118,7 @@ export class DraftService {
       isDuplicateLikely: cand.is_duplicate,
     });
 
-    const draftId = `draft-${Date.now()}`;
+    const draftId = `draft-${crypto.randomUUID()}`;
     const initialStatus = DraftStatus.PENDING_APPROVAL;
 
     const draft: ContentDraft = {
@@ -168,6 +187,8 @@ export class DraftService {
       ]
     );
 
+    await this.entitlementGuard.markGenerated(channel.id);
+
     // 7. Audit Log
     await AuditService.log(
       channel.workspace_id,
@@ -207,6 +228,14 @@ export class DraftService {
       throw new Error(`Draft ${draftId} not found`);
     }
     const current = res.rows[0];
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [current.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; AI revision is fail-closed');
+    const revisionOperationKey = `draft-revision:${draftId}:${crypto.randomUUID()}`;
+    await this.entitlementGuard.assert({
+      accountId, workspaceId: current.workspace_id, channelId: current.channel_id,
+      operation: 'AI_EDIT', source: 'draft-service', idempotencyKey: revisionOperationKey,
+    });
 
     const whyMatters = typeof current.why_it_matters === 'string'
       ? JSON.parse(current.why_it_matters)
@@ -215,23 +244,17 @@ export class DraftService {
       ? JSON.parse(current.sources)
       : current.sources;
 
-    const revised = await ai.reviseDraft(
-      {
-        headline: current.headline,
-        body: current.body,
-        explanation: current.explanation,
-        whyItMatters: whyMatters,
-        technicalContext: current.technical_context,
-        whatToWatch: current.what_to_watch,
-        sources,
-        confidence: current.confidence_score,
-        contentScore: current.content_score,
-        contentType: current.content_type,
-        topics: [current.topic],
-        extractedClaims: [],
-      },
-      instruction
-    );
+    let revised: Awaited<ReturnType<typeof ai.reviseDraft>>;
+    try {
+      revised = await ai.reviseDraft(
+        { headline: current.headline, body: current.body, explanation: current.explanation, whyItMatters: whyMatters, technicalContext: current.technical_context, whatToWatch: current.what_to_watch, sources, confidence: current.confidence_score, contentScore: current.content_score, contentType: current.content_type, topics: [current.topic], extractedClaims: [] },
+        instruction
+      );
+      await this.entitlementGuard.markAttemptOutcome('AI_EDIT', revisionOperationKey, 'SUCCESSFUL');
+    } catch (error) {
+      await this.entitlementGuard.markAttemptOutcome('AI_EDIT', revisionOperationKey, 'FAILED', error instanceof Error ? error.message : 'AI request failed');
+      throw error;
+    }
 
     const newRevisionCount = (current.revision_count || 0) + 1;
     await db.query(
@@ -261,6 +284,15 @@ export class DraftService {
     } catch (prefErr) {
       console.warn('Failed to infer preference from edit:', prefErr);
     }
+    await this.editorialPlanning.recordLearning({
+      workspaceId: current.workspace_id,
+      channelId: current.channel_id,
+      draftId,
+      action: 'EDIT',
+      signalKey: 'edit_instruction',
+      signalValue: instruction.slice(0, 500),
+      metadata: { revision: newRevisionCount },
+    });
 
     await AuditService.log(
       current.workspace_id,
@@ -349,17 +381,23 @@ export class DraftService {
   ): Promise<ContentDraft & { targetLanguage: string }> {
     const langSettings = await this.brainService.getLanguageSettings(channelId);
     const targetLanguage = langSettings.contentLanguage || 'en';
+    const db = getDatabaseClient();
+    const channelRes = await db.query('SELECT workspace_id FROM channels WHERE id = $1', [channelId]);
+    if (!channelRes.rowCount) throw new Error('Channel not found');
+    const workspaceId = channelRes.rows[0].workspace_id;
 
     let synthesizedHeadline = candidate.title;
     let synthesizedBody = candidate.content || candidate.title;
 
-    // Simulate multilingual synthesis (e.g., Japanese or German -> English)
-    if (candidate.sourceLanguage === 'ja' || candidate.title.includes('ヒューマノイド')) {
-      synthesizedHeadline = 'Autonomous Humanoid Robotics Control Architecture Powered by CUDA and Transformer Models';
-      synthesizedBody = 'Japanese robotics researchers have presented a next-generation humanoid controller that leverages CUDA accelerated compute kernels and Transformer attention architectures for real-time spatial manipulation.';
-    } else if (candidate.sourceLanguage === 'de' || candidate.title.includes('Quanten')) {
-      synthesizedHeadline = 'Quantum-Inspired Tensor Compression Accelerates Transformer Inference';
-      synthesizedBody = 'Researchers have developed an open-source tensor compression library that accelerates matrix multiplication kernels on GPU clusters with CUDA while maintaining precision.';
+    // Explicit demo-only multilingual synthesis fixture. Production preserves
+    // the connector-provided candidate and delegates synthesis to the real AI
+    // provider rather than manufacturing research claims in application code.
+    if (process.env.DEMO_MODE === 'true' && (candidate.sourceLanguage === 'ja' || candidate.title.includes('ヒューマノイド'))) {
+      synthesizedHeadline = 'Demo: Humanoid Robotics Control Architecture with CUDA';
+      synthesizedBody = 'Demo fixture translation for a Japanese multilingual candidate using CUDA and Transformer control.';
+    } else if (process.env.DEMO_MODE === 'true' && (candidate.sourceLanguage === 'de' || candidate.title.includes('Quanten'))) {
+      synthesizedHeadline = 'Demo: Quantum-Inspired Tensor Compression';
+      synthesizedBody = 'Demo fixture translation for a German multilingual candidate.';
     }
 
     if (langSettings.preserveTechnicalTerms) {
@@ -368,10 +406,10 @@ export class DraftService {
     }
 
     const draft: ContentDraft & { targetLanguage: string } = {
-      id: `draft-synth-${Date.now()}`,
-      workspaceId: 'ws-demo-001',
+      id: `draft-synth-${crypto.randomUUID()}`,
+      workspaceId,
       channelId,
-      candidateId: candidate.id || `cand-synth-${Date.now()}`,
+      candidateId: candidate.id || `cand-synth-${crypto.randomUUID()}`,
       topic: 'Robotics & Hardware',
       title: candidate.title,
       headline: synthesizedHeadline,

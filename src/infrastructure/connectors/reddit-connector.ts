@@ -77,22 +77,15 @@ export class RedditConnector implements ISocialSourceProvider {
       }
     }
 
-    // High-Fidelity Demo Fallback
-    return [
-      {
-        title: `Community benchmark on r/${sub}: ${query} inference throughput`,
-        url: `https://reddit.com/r/${sub}/comments/demo_${Math.random().toString(36).substring(7)}`,
-        sourceName: `Reddit r/${sub}`,
-        publishedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-        summary: `Community members benchmarked ${query} across dual RTX 4090 nodes, observing 42% reduced VRAM allocation when using 4-bit AWQ weights.`,
-        claims: [
-          'VRAM footprint reduced by 42% with 4-bit quantization',
-          'Compatible with standard Ollama and llama.cpp runtimes',
-        ],
-        relevanceScore: 84,
-        noveltyScore: 89,
-        technicalDepthScore: 86,
-      },
-    ];
+    if (process.env.DEMO_MODE !== 'true') return [];
+    // Explicit demo/simulation fixture only.
+    return [{
+      title: `Demo: community analysis of ${query}`,
+      url: 'https://example.invalid/demo/reddit-signal',
+      sourceName: 'Demo Reddit Fixture',
+      publishedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+      summary: `Demo-only community discussion of ${query}.`,
+      claims: [`Demo fixture for ${query}`], relevanceScore: 80, noveltyScore: 78, technicalDepthScore: 82,
+    }];
   }
 }

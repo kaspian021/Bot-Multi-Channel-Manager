@@ -29,10 +29,15 @@ The system implements a rigid permission boundary model:
 
 The `PermissionGuard` actively intercepts operations and throws a `PermissionViolationError` if an autonomous worker or unverified actor attempts a YELLOW or RED action.
 
-## 2. Telegram Identity Verification (Section 45)
+## 2. Telegram Identity Verification (Phase 4)
 
-- **Numeric User ID vs. Usernames**: Telegram usernames can be changed or impersonated. All owner authorization checks validate the numeric `from.id` against the configured `TELEGRAM_OWNER_USER_ID`.
-- **Callback Data Integrity**: Action callbacks (`APPROVE_DRAFT`, `PUBLISH_NOW`, `REJECT_DRAFT`) re-verify the sender's identity, the draft's existence, and the legal state transitions before executing any change.
+- **Numeric User ID vs. Usernames**: Telegram usernames are snapshots only. A verified `telegram_identities.telegram_user_id` is bound to an external account through a one-time, short-lived opaque deep-link challenge. `TELEGRAM_OWNER_USER_ID` survives only as a `DEMO_MODE` simulator fallback; it is not production authorization.
+- **Tenant callback integrity**: Callback resource IDs are not authorization. Every callback loads the draft/channel, resolves the sender's linked account and active workspace membership, verifies the required role, then checks the legal state transition.
+- **Link challenge safety**: Tokens are random, SHA-256 hashed at rest, atomic single-use, TTL-limited, audited, and cannot silently reassign an existing Telegram identity.
+
+## 2.1 Integration webhook verification
+
+Subscription lifecycle webhooks verify raw-body HMAC-SHA256 signatures using a configured shared secret, a timestamp replay window, constant-time comparison, and a durable event-id uniqueness record. Missing verification fails closed and never trusts a client-provided subscription status.
 
 ## 3. SSRF Protection (Section 47)
 

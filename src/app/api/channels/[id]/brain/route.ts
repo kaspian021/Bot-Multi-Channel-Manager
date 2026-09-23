@@ -1,33 +1,7 @@
-// ==============================================================
-// Channel Brain API (GET, PUT) — Section 25 Specification
-// ==============================================================
-
 import { NextRequest, NextResponse } from 'next/server';
 import { ChannelBrainService } from '@/application/services/channel-brain-service';
-import { seedDatabase } from '@/infrastructure/database/seed';
-
-export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  await seedDatabase(false);
-  const brainService = new ChannelBrainService();
-  const brain = await brainService.getBrain(params.id);
-  if (!brain) {
-    return NextResponse.json({ error: 'Channel Brain not found' }, { status: 404 });
-  }
-  return NextResponse.json(brain);
-}
-
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const brainService = new ChannelBrainService();
-    const body = await req.json();
-    const changedBy = body.changedBy || 'owner';
-    const reason = body.reason || 'Manual update via Admin Dashboard';
-
-    const saved = await brainService.saveBrain(params.id, body, changedBy, reason);
-    return NextResponse.json(saved);
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to update Channel Brain' }, { status: 500 });
-  }
-}
+import { apiError, tenantFor } from '@/app/api/api-helpers';
+import { requireChannelAccess, requireWorkspaceRole } from '@/application/services/tenant-context-service';
+export const dynamic='force-dynamic';
+export async function GET(req:NextRequest,{params}:{params:{id:string}}){try{const ctx=await tenantFor(req);await requireChannelAccess(ctx,params.id);const brain=await new ChannelBrainService().getBrain(params.id);return brain?NextResponse.json(brain):NextResponse.json({error:'Channel Brain not found'},{status:404});}catch(e){return apiError(e);}}
+export async function PUT(req:NextRequest,{params}:{params:{id:string}}){try{const ctx=await tenantFor(req);requireWorkspaceRole(ctx,'EDITOR');await requireChannelAccess(ctx,params.id,'EDITOR');const body=await req.json();const saved=await new ChannelBrainService().saveBrain(params.id,body,ctx.accountId,body.reason || 'Manual workspace update');return NextResponse.json(saved);}catch(e){return apiError(e,'Failed to update Channel Brain');}}

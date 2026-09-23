@@ -70,12 +70,13 @@ export class GeminiSearchGroundingProvider implements IWebSearchProvider {
           }
         }
       } catch (err) {
-        console.warn('Gemini Search Grounding request failed, falling back to mock ground:', err);
+        console.warn('Gemini Search Grounding request failed:', err);
         throw err;
       }
     }
 
-    // High-Fidelity Demo Grounding
+    if (process.env.DEMO_MODE !== 'true') return [];
+    // Explicit demo-only grounding fixture.
     return [
       {
         title: `Official Engineering Announcement: ${query}`,

@@ -5,10 +5,12 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
+    if (process.env.DEMO_MODE !== 'true') return NextResponse.json({ error: 'Telegram simulation is available only in DEMO_MODE' }, { status: 404 });
     const body = await req.json();
     const bot = getTelegramBotService();
-    const ownerId = parseInt(process.env.TELEGRAM_OWNER_USER_ID || '987654321', 10);
-    const senderId = body.userId ? parseInt(body.userId, 10) : ownerId;
+    const demoOwnerId = process.env.DEMO_MODE === 'true' ? parseInt(process.env.TELEGRAM_OWNER_USER_ID || '987654321', 10) : NaN;
+    const senderId = body.userId ? parseInt(body.userId, 10) : demoOwnerId;
+    if (!Number.isFinite(senderId)) return NextResponse.json({ error: 'userId is required outside DEMO_MODE' }, { status: 400 });
 
     let update: TelegramUpdate;
 

@@ -9,28 +9,65 @@ export async function seedDatabase(force = false): Promise<void> {
   await runMigrations();
   const db = getDatabaseClient();
 
-  // Check if already seeded
-  const existing = await db.query('SELECT count(*) as count FROM workspaces');
-  const count = parseInt(existing.rows[0]?.count || '0', 10);
-  if (count > 0 && !force) {
-    // Check if channel_brains table already has entries
-    const brainCheck = await db.query('SELECT count(*) as count FROM channel_brains');
-    const claimsCheck = await db.query('SELECT count(*) as count FROM claims');
-    if (parseInt(brainCheck.rows[0]?.count || '0', 10) > 0 && parseInt(claimsCheck.rows[0]?.count || '0', 10) > 0) {
-      return;
-    }
-  }
+  // Demo data is deliberately isolated. Production starts empty and receives
+  // identities/subscriptions from its external account provider.
+  if (process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true' && !force) return;
 
-  const workspaceId = 'ws-demo-001';
+  const workspaceId = process.env.DEMO_WORKSPACE_ID || 'ws-demo-001';
   const channelId = 'ch-futurestack-001';
+  const accountId = process.env.DEMO_ACCOUNT_ID || 'acc-demo-001';
   const ownerUserId = process.env.TELEGRAM_OWNER_USER_ID || '987654321';
+  const productKey = process.env.PRODUCT_KEY || 'ai-channel-manager';
 
-  // 1. Workspace
+  // 1. Explicit Phase 4 demo account, identity, workspace membership and
+  // persisted entitlement. These IDs never participate in production routing.
   await db.query(
-    `INSERT INTO workspaces (id, name, slug, owner_user_id) 
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (id) DO NOTHING`,
-    [workspaceId, 'Demo Workspace', 'demo-workspace', ownerUserId]
+    `INSERT INTO accounts (id, external_provider, external_user_id, status, display_name)
+     VALUES ($1, 'demo', 'demo-owner-001', 'ACTIVE', 'Demo Owner')
+     ON CONFLICT (id) DO NOTHING`, [accountId]
+  );
+  await db.query(
+    `INSERT INTO workspaces (id, name, slug, owner_user_id, account_id)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET account_id = COALESCE(workspaces.account_id, EXCLUDED.account_id)`,
+    [workspaceId, 'Demo Workspace', 'demo-workspace', ownerUserId, accountId]
+  );
+  await db.query(
+    `INSERT INTO workspace_members (workspace_id, account_id, role, status)
+     VALUES ($1, $2, 'OWNER', 'ACTIVE')
+     ON CONFLICT (workspace_id, account_id) DO UPDATE SET role = 'OWNER', status = 'ACTIVE'`,
+    [workspaceId, accountId]
+  );
+  await db.query(
+    `INSERT INTO telegram_identities (id, account_id, telegram_user_id, telegram_username_snapshot, verified_at, status)
+     VALUES ('tgid-demo-001', $1, $2, 'demo_owner', CURRENT_TIMESTAMP, 'ACTIVE')
+     ON CONFLICT (telegram_user_id) DO UPDATE SET account_id = EXCLUDED.account_id, status = 'ACTIVE', verified_at = CURRENT_TIMESTAMP`,
+    [accountId, ownerUserId]
+  );
+  // The active channel is assigned after the fixture channel is inserted below.
+  await db.query(
+    `INSERT INTO telegram_user_context (telegram_user_id, account_id, active_workspace_id, active_channel_id)
+     VALUES ($1, $2, $3, NULL)
+     ON CONFLICT (telegram_user_id) DO UPDATE SET account_id = EXCLUDED.account_id, active_workspace_id = EXCLUDED.active_workspace_id, active_channel_id = NULL, updated_at = CURRENT_TIMESTAMP`,
+    [ownerUserId, accountId, workspaceId]
+  );
+  await db.query(`INSERT INTO products (product_key, name, status) VALUES ($1, 'AI Channel Manager', 'ACTIVE') ON CONFLICT (product_key) DO NOTHING`, [productKey]);
+  const demoFeatures = { autonomousGeneration: true, webResearch: true, socialResearch: true, strategyRecommendations: true, advancedEditorialPlanning: true };
+  const demoLimits = { maxChannels: 10, postsPerDay: 20, aiRequestsPerDay: 100, researchRunsPerDay: 50, generationIntervalSeconds: 300, researchIntervalSeconds: 10800 };
+  await db.query(
+    `INSERT INTO plans (product_key, plan_code, name, feature_defaults, limit_defaults, status)
+     VALUES ($1, 'demo-pro', 'Demo Pro', $2, $3, 'ACTIVE') ON CONFLICT (product_key, plan_code) DO NOTHING`,
+    [productKey, JSON.stringify(demoFeatures), JSON.stringify(demoLimits)]
+  );
+  await db.query(
+    `INSERT INTO subscriptions (id, account_id, product_key, plan_code, status, started_at, current_period_start, current_period_end, cancel_at_period_end, provider_subscription_id)
+     VALUES ('sub-demo-001', $1, $2, 'demo-pro', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '365 days', FALSE, 'demo-sub-001')
+     ON CONFLICT (id) DO NOTHING`, [accountId, productKey]
+  );
+  await db.query(
+    `INSERT INTO entitlement_snapshots (id, account_id, product_key, subscription_id, status, plan_code, valid_until, features_json, limits_json, version, source, is_active)
+     VALUES ('ent-demo-001', $1, $2, 'sub-demo-001', 'ACTIVE', 'demo-pro', CURRENT_TIMESTAMP + INTERVAL '365 days', $3, $4, 1, 'MOCK', TRUE)
+     ON CONFLICT (id) DO NOTHING`, [accountId, productKey, JSON.stringify(demoFeatures), JSON.stringify(demoLimits)]
   );
 
   // 2. Channel: FutureStack AI
@@ -53,6 +90,27 @@ export async function seedDatabase(force = false): Promise<void> {
       3,
       'UTC',
     ]
+  );
+
+  await db.query(
+    `UPDATE telegram_user_context SET active_channel_id = $1, updated_at = CURRENT_TIMESTAMP WHERE telegram_user_id = $2`,
+    [channelId, ownerUserId]
+  );
+
+  // A second explicitly-demo channel proves per-workspace multi-channel
+  // selection and prevents an accidental single-channel worker assumption.
+  await db.query(
+    `INSERT INTO channels (
+      id, workspace_id, name, telegram_chat_id, telegram_channel_username,
+      language, status, description, bio, posting_frequency, timezone
+    ) VALUES ($1, $2, 'FutureStack Research', '@futurestack_research', '@futurestack_research', 'en', 'ACTIVE',
+      'Demo research companion channel.', 'Demo secondary channel.', 2, 'UTC')
+    ON CONFLICT (id) DO NOTHING`,
+    ['ch-demo-research-002', workspaceId]
+  );
+  await db.query(
+    `INSERT INTO channel_strategies (channel_id, language, posting_frequency, preferred_posting_windows)
+     VALUES ('ch-demo-research-002', 'en', 2, '["10:00","18:00"]') ON CONFLICT (channel_id) DO NOTHING`
   );
 
   // 3. Channel Strategy
@@ -696,4 +754,13 @@ export async function seedDatabase(force = false): Promise<void> {
     cl1Id, draft1Id, channelId, JSON.stringify([ev1Id]),
     cl2Id, JSON.stringify([ev2Id])
   ]);
+
+  // Small, immutable demo usage history for the Phase 4 dashboard.
+  await db.query(
+    `INSERT INTO usage_events (id, account_id, workspace_id, channel_id, product_key, metric, quantity, source, idempotency_key, metadata)
+     VALUES ('usage-demo-001', $1, $2, $3, $4, 'RESEARCH_RUN', 1, 'demo-seed', 'demo-seed-research-001', '{}'),
+            ('usage-demo-002', $1, $2, $3, $4, 'CONTENT_GENERATION', 1, 'demo-seed', 'demo-seed-generation-001', '{}')
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [accountId, workspaceId, channelId, productKey]
+  );
 }

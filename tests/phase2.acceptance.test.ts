@@ -25,6 +25,8 @@ describe('Phase 2 Acceptance Tests — AC-01 to AC-22', () => {
   const defaultChannelId = 'ch-futurestack-001';
 
   beforeAll(async () => {
+    // Phase 2 multilingual examples are deterministic explicit demo fixtures.
+    process.env.DEMO_MODE = 'true';
     db = getDatabaseClient();
     await seedDatabase(true); // Fresh migrations and seed
     brainService = new ChannelBrainService();

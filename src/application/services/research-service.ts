@@ -2,6 +2,7 @@
 // Research Service — Extended with Channel Brain & Multilingual
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { getAiProvider } from '../../infrastructure/ai/ai-provider-factory';
 import { RssFeedConnector } from '../../infrastructure/connectors/rss-connector';
@@ -12,6 +13,8 @@ import { AuditService } from './audit-service';
 import { AuditActorType, ContentCandidate, ContentType } from '../../domain/types';
 import { RawResearchCandidate } from '../interfaces/ai-providers';
 import { ChannelBrainService } from './channel-brain-service';
+import { EntitlementGuard } from './entitlement-service';
+import { getDemoSyntheticMultilingualCandidates } from '../../infrastructure/demo/demo-multilingual-candidates';
 
 export class ResearchService {
   private rss = new RssFeedConnector();
@@ -19,6 +22,7 @@ export class ResearchService {
   private youtube = new YouTubeConnector();
   private reddit = new RedditConnector();
   private brainService = new ChannelBrainService();
+  private entitlementGuard = new EntitlementGuard();
 
   async executeResearchRun(channelId: string): Promise<{ runId: string; candidatesFound: number; candidates: ContentCandidate[] }> {
     const db = getDatabaseClient();
@@ -30,6 +34,17 @@ export class ResearchService {
       throw new Error(`Channel ${channelId} not found`);
     }
     const channel = channelRes.rows[0];
+    const workspace = await db.query<{ account_id: string | null }>('SELECT account_id FROM workspaces WHERE id = $1', [channel.workspace_id]);
+    const accountId = workspace.rows[0]?.account_id;
+    if (!accountId) throw new Error('Workspace is not bound to an account; research is fail-closed');
+    await this.entitlementGuard.assert({
+      accountId,
+      workspaceId: channel.workspace_id,
+      channelId,
+      operation: 'RESEARCH',
+      source: 'research-service',
+      idempotencyKey: `research:${channelId}:${crypto.randomUUID()}`,
+    });
 
     const brain = await this.brainService.getBrain(channelId);
     const langSettings = await this.brainService.getLanguageSettings(channelId);
@@ -42,7 +57,7 @@ export class ResearchService {
     const excludedKeywords = brain?.content.excludedTopics || [];
     const sourceLanguages = langSettings.allowedSourceLanguages || ['en', 'de', 'ja'];
 
-    const runId = `run-${Date.now()}`;
+    const runId = `run-${crypto.randomUUID()}`;
     const query = topicNames.slice(0, 4).join(' OR ') || 'Artificial Intelligence';
 
     await db.query(
@@ -76,41 +91,12 @@ export class ResearchService {
       }
     }
 
-    // Multilingual Discovery (Section 14: Sources in German, Japanese, English)
-    if (sourceLanguages.includes('de')) {
-      rawCandidates.push({
-        title: 'Max-Planck-Institut: Quanten-Algorithmus beschleunigt Transformer-Inferenz (Quantum Acceleration for Transformers)',
-        url: 'https://mpg.de/forschung/quanten-ki-2026',
-        sourceName: 'Max Planck Institute (German Source)',
-        publishedAt: new Date().toISOString(),
-        summary: 'Forscher am Max-Planck-Institut veröffentlichen quanteninspirierte Tensorkompression, die Matrixmultiplikationen auf herkömmlichen GPUs um das 2,8-Fache beschleunigt.',
-        claims: [
-          'Quanteninspirierte Tensorkompression erzielt 2,8-fache Geschwindigkeitssteigerung auf NVIDIA H100',
-          'Vollständig kompatibel mit PyTorch und FlashAttention-3'
-        ],
-        relevanceScore: 94,
-        noveltyScore: 92,
-        technicalDepthScore: 96,
-        sourceLanguage: 'de',
-      } as any);
-    }
-
-    if (sourceLanguages.includes('ja')) {
-      rawCandidates.push({
-        title: '東京大学：次世代ヒューマノイドロボット向けCUDA自律制御モデル',
-        url: 'https://u-tokyo.ac.jp/robotics-2026',
-        sourceName: 'University of Tokyo (Japanese Source)',
-        publishedAt: new Date().toISOString(),
-        summary: '日本の東京大学研究チームが、CUDAとTransformerを活用したヒューマノイドロボットのリアルタイム制御アーキテクチャを発表。',
-        claims: [
-          'CUDAアクセラレーションによりロボットアームの軌道計算遅延を70%削減',
-          '実時間環境認識と姿勢制御を単一モデルで統合'
-        ],
-        relevanceScore: 92,
-        noveltyScore: 90,
-        technicalDepthScore: 94,
-        sourceLanguage: 'ja',
-      } as any);
+    // Demo fixtures are deliberately isolated from production research. In
+    // production, multilingual candidates can only originate from configured
+    // connectors, search grounding, fetched sources, and stored evidence.
+    if (process.env.DEMO_MODE === 'true') {
+      const demoSyntheticCandidates = getDemoSyntheticMultilingualCandidates(sourceLanguages);
+      rawCandidates.push(...demoSyntheticCandidates);
     }
 
     // Fallback if no source returned items
@@ -179,7 +165,7 @@ export class ResearchService {
         confidence: 90,
       });
 
-      const candId = `cand-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const candId = `cand-${crypto.randomUUID()}`;
       const candidate: ContentCandidate = {
         id: candId,
         workspaceId: channel.workspace_id,

@@ -54,7 +54,7 @@ export async function GET() {
         name: 'Telegram Bot API Publisher',
         configured: bot.isConfigured(),
         status: isDemoMode ? 'DEMO_MODE' : bot.isConfigured() ? 'OPERATIONAL' : 'UNCONFIGURED',
-        ownerUserId: process.env.TELEGRAM_OWNER_USER_ID || '987654321',
+        authorization: 'workspace-linked Telegram identities',
       },
     };
 

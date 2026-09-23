@@ -2,6 +2,7 @@
 // Channel Brand & Strategy Service — Section 27-30 Specification
 // ==============================================================
 
+import crypto from 'crypto';
 import { getDatabaseClient } from '../../infrastructure/database/db-client';
 import { getAiProvider } from '../../infrastructure/ai/ai-provider-factory';
 import { AuditService } from './audit-service';
@@ -22,7 +23,7 @@ export class BrandService {
     const promptText = `Propose an identity refresh for channel ${channel.name} focusing on AI & Engineering.`;
     const imageResult = await ai.generateImage('Minimalist modern cybernetic logo, dark obsidian and neon emerald, high resolution');
 
-    const proposalId = `brand-${Date.now()}`;
+    const proposalId = `brand-${crypto.randomUUID()}`;
     const proposal: ChannelBrandProposal = {
       id: proposalId,
       channelId,
@@ -74,8 +75,9 @@ export class BrandService {
     await db.query("UPDATE channel_brand_proposals SET status = 'APPLIED' WHERE id = $1", [proposalId]);
 
     const chanRes = await db.query('SELECT workspace_id FROM channels WHERE id = $1', [p.channel_id]);
+    if (!chanRes.rowCount) throw new Error('Channel no longer exists');
     await AuditService.log(
-      chanRes.rows[0]?.workspace_id || 'ws-demo-001',
+      chanRes.rows[0].workspace_id,
       p.channel_id,
       AuditActorType.OWNER,
       ownerUserId,

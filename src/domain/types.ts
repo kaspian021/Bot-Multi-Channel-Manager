@@ -586,7 +586,7 @@ export interface ScheduledPost {
   channelId: string;
   draftId: string;
   scheduledFor: string;
-  status: 'PENDING' | 'PUBLISHED' | 'CANCELLED' | 'FAILED';
+  status: 'PENDING' | 'PUBLISHED' | 'CANCELLED' | 'FAILED' | 'BLOCKED_ENTITLEMENT';
   retryCount: number;
   idempotencyKey: string;
   lastAttemptAt?: string;
@@ -658,4 +658,191 @@ export interface SystemHealthStatus {
     failed: number;
     lastRunAt?: string;
   };
+}
+
+// ==============================================================
+// PHASE 4: ACCOUNT, COMMERCIAL CONTRACT & EDITORIAL OPERATIONS
+// ==============================================================
+
+export type WorkspaceRole = 'OWNER' | 'ADMIN' | 'EDITOR' | 'APPROVER' | 'VIEWER';
+export type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
+export type TelegramIdentityStatus = 'ACTIVE' | 'REVOKED';
+
+export interface Account {
+  id: string;
+  externalProvider: string;
+  externalUserId: string;
+  status: AccountStatus;
+  displayName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalIdentity {
+  provider: string;
+  externalUserId: string;
+  accountId: string;
+}
+
+export interface TelegramIdentity {
+  id: string;
+  accountId: string;
+  telegramUserId: string;
+  telegramUsernameSnapshot?: string;
+  verifiedAt?: string;
+  status: TelegramIdentityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceMember {
+  workspaceId: string;
+  accountId: string;
+  role: WorkspaceRole;
+  status: 'ACTIVE' | 'INVITED' | 'REVOKED';
+  createdAt: string;
+}
+
+export interface Product {
+  key: string;
+  name: string;
+  status: 'ACTIVE' | 'ARCHIVED';
+}
+
+export interface Plan {
+  productKey: string;
+  code: string;
+  name: string;
+  featureDefaults: EntitlementFeatures;
+  limitDefaults: EntitlementLimits;
+  status: 'ACTIVE' | 'ARCHIVED';
+}
+
+export enum SubscriptionStatus {
+  TRIALING = 'TRIALING',
+  ACTIVE = 'ACTIVE',
+  GRACE = 'GRACE',
+  PAST_DUE = 'PAST_DUE',
+  SUSPENDED = 'SUSPENDED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export interface Subscription {
+  id: string;
+  accountId: string;
+  productKey: string;
+  planCode: string;
+  status: SubscriptionStatus;
+  startedAt: string;
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd: boolean;
+  effectiveAt?: string;
+  providerSubscriptionId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EntitlementFeatures {
+  autonomousGeneration: boolean;
+  webResearch: boolean;
+  socialResearch: boolean;
+  strategyRecommendations: boolean;
+  advancedEditorialPlanning: boolean;
+  autonomousPublishing?: boolean;
+}
+
+export interface EntitlementLimits {
+  maxChannels: number;
+  postsPerDay: number;
+  aiRequestsPerDay: number;
+  researchRunsPerDay: number;
+  generationIntervalSeconds: number;
+  researchIntervalSeconds?: number;
+}
+
+export interface Entitlement {
+  id?: string;
+  productKey: string;
+  accountId: string;
+  status: SubscriptionStatus;
+  planCode: string;
+  validUntil?: string;
+  features: EntitlementFeatures;
+  limits: EntitlementLimits;
+  version: number;
+  source?: 'MOCK' | 'REMOTE' | 'SNAPSHOT';
+  resolvedAt?: string;
+}
+
+export type UsageMetric =
+  | 'AI_REQUEST'
+  | 'CONTENT_GENERATION'
+  | 'RESEARCH_RUN'
+  | 'POST_PUBLISHED'
+  | 'CHANNEL_CREATED';
+
+export interface UsageEvent {
+  id: string;
+  accountId: string;
+  workspaceId?: string;
+  channelId?: string;
+  productKey: string;
+  metric: UsageMetric;
+  quantity: number;
+  source: string;
+  idempotencyKey: string;
+  occurredAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface IntegrationEvent {
+  id: string;
+  type: 'usage.recorded' | 'subscription.changed' | 'entitlement.changed' | 'account.linked' | 'channel.linked';
+  aggregateId: string;
+  payload: Record<string, unknown>;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  retryCount: number;
+  nextAttemptAt?: string;
+  idempotencyKey: string;
+  createdAt: string;
+}
+
+export interface AccountLinkToken {
+  id: string;
+  accountId: string;
+  workspaceId?: string;
+  expiresAt: string;
+  consumedAt?: string;
+  status: 'PENDING' | 'CONSUMED' | 'REJECTED' | 'EXPIRED';
+}
+
+export interface EditorialPlan {
+  id: string;
+  date: string;
+  channelId: string;
+  targetPosts: number;
+  contentMixTargets: Record<string, number>;
+  selectedTopics: string[];
+  preferredWindows: string[];
+  plannedCandidateIds: string[];
+  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED' | 'STALE';
+  generatedAt: string;
+  rationale?: Record<string, unknown>;
+}
+
+export type EditorialLearningAction = 'APPROVE' | 'EDIT' | 'REJECT' | 'REGENERATE' | 'TIME_CHANGE' | 'TOPIC_CHANGE' | 'STYLE_CHANGE';
+
+export interface EditorialLearningEvent {
+  id: string;
+  channelId: string;
+  draftId?: string;
+  action: EditorialLearningAction;
+  signalKey: string;
+  signalValue: string;
+  confidence: number;
+  provenance: 'OWNER_ACTION' | 'EXPLICIT_RULE';
+  metadata?: Record<string, unknown>;
+  createdAt: string;
 }
